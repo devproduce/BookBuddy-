@@ -43,6 +43,8 @@ export function setUnauthorizedListener(listener: UnauthorizedListener | null) {
 
 interface RequestOptions {
   body?: unknown
+  /** Multipart upload; the browser sets the Content-Type boundary. */
+  formData?: FormData
   /** Skip the global 401 handler (used for login/register). */
   skipAuthRedirect?: boolean
   signal?: AbortSignal
@@ -51,19 +53,19 @@ interface RequestOptions {
 async function request<T>(
   method: string,
   path: string,
-  { body, skipAuthRedirect, signal }: RequestOptions = {},
+  { body, formData, skipAuthRedirect, signal }: RequestOptions = {},
 ): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' }
   const token = tokenStore.get()
   if (token) headers.Authorization = `Bearer ${token}`
-  if (body !== undefined) headers['Content-Type'] = 'application/json'
+  if (body !== undefined && !formData) headers['Content-Type'] = 'application/json'
 
   let res: Response
   try {
     res = await fetch(`${API_BASE_URL}${path}`, {
       method,
       headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: formData ?? (body === undefined ? undefined : JSON.stringify(body)),
       signal,
     })
   } catch (err) {
@@ -108,6 +110,8 @@ export const api = {
   get: <T>(path: string, opts?: RequestOptions) => request<T>('GET', path, opts),
   post: <T>(path: string, body?: unknown, opts?: RequestOptions) =>
     request<T>('POST', path, { ...opts, body }),
+  upload: <T>(path: string, formData: FormData, opts?: RequestOptions) =>
+    request<T>('POST', path, { ...opts, formData }),
   patch: <T>(path: string, body?: unknown, opts?: RequestOptions) =>
     request<T>('PATCH', path, { ...opts, body }),
   delete: <T = void>(path: string, opts?: RequestOptions) => request<T>('DELETE', path, opts),

@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { ProtectedRoute, PublicOnlyRoute } from './auth/ProtectedRoute'
 import { AppShell } from './components/AppShell'
 import { AddBookPage } from './pages/AddBookPage'
+import { BookDetailPage } from './pages/BookDetailPage'
 import { ComingSoonPage, NotFoundPage } from './pages/ComingSoonPage'
 import { HomePage } from './pages/HomePage'
 import { LibraryPage } from './pages/LibraryPage'
@@ -22,6 +23,7 @@ export default function App() {
           <Route index element={<HomePage />} />
           <Route path="library" element={<LibraryPage />} />
           <Route path="library/add" element={<AddBookPage />} />
+          <Route path="library/:id" element={<BookDetailPage />} />
           <Route
             path="chat"
             element={

@@ -28,7 +28,11 @@ function BookCard({ book, onDelete }: { book: Book; onDelete: (b: Book) => void 
         <span>{book.title.slice(0, 1).toUpperCase()}</span>
       </div>
       <div className="book__body">
-        <h3 className="book__title">{book.title}</h3>
+        <h3 className="book__title">
+          <Link to={`/library/${book.id}`} className="book__link">
+            {book.title}
+          </Link>
+        </h3>
         <p className="book__author">{book.author || 'Unknown author'}</p>
         <p className="book__meta">
           {book.pageCount ? `${book.pageCount} pages · ` : ''}

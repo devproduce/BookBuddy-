@@ -1,84 +1,188 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { booksApi, sha256Hex } from '../api/books'
+import {
+  booksApi,
+  pollUntilDone,
+  sha256File,
+  STAGE_LABEL,
+  type BookProcessingStatus,
+} from '../api/books'
+import { ApiError } from '../api/client'
 import { Alert } from '../components/Alert'
 import { errorMessage } from '../components/errorMessage'
 
-const HASH_RE = /^[A-Fa-f0-9]{64}$/
+type Phase = 'idle' | 'hashing' | 'creating' | 'uploading' | 'processing'
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+function titleFromFilename(name: string): string {
+  return name
+    .replace(/\.pdf$/i, '')
+    .replace(/[_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
 
 export function AddBookPage() {
   const navigate = useNavigate()
+  const fileInput = useRef<HTMLInputElement>(null)
+  const abortRef = useRef<AbortController | null>(null)
+
+  const [file, setFile] = useState<File | null>(null)
   const [title, setTitle] = useState('')
   const [author, setAuthor] = useState('')
-  const [pageCount, setPageCount] = useState('')
-  const [fileSize, setFileSize] = useState('')
   const [contentHash, setContentHash] = useState('')
+  const [phase, setPhase] = useState<Phase>('idle')
+  const [status, setStatus] = useState<BookProcessingStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [duplicateId, setDuplicateId] = useState<string | null>(null)
+  const [createdId, setCreatedId] = useState<string | null>(null)
 
-  async function generateHash() {
-    if (!title.trim()) {
-      setError('Enter a title first, then we can generate a demo hash from it.')
+  const busy = phase !== 'idle'
+
+  useEffect(() => () => abortRef.current?.abort(), [])
+
+  async function onPickFile(e: ChangeEvent<HTMLInputElement>) {
+    const picked = e.target.files?.[0] ?? null
+    setError(null)
+    setDuplicateId(null)
+    setContentHash('')
+    if (!picked) {
+      setFile(null)
       return
     }
-    setError(null)
-    setContentHash(await sha256Hex(`${title.trim()}|${author.trim()}`))
+    const looksLikePdf = picked.type === 'application/pdf' || /\.pdf$/i.test(picked.name)
+    if (!looksLikePdf) {
+      setFile(null)
+      setError('Please choose a PDF file.')
+      return
+    }
+    setFile(picked)
+    setTitle((t) => t || titleFromFilename(picked.name))
+
+    setPhase('hashing')
+    try {
+      setContentHash(await sha256File(picked))
+    } catch (err) {
+      setFile(null)
+      setError(errorMessage(err))
+    } finally {
+      setPhase('idle')
+    }
   }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
     setError(null)
+    setDuplicateId(null)
 
     const cleanTitle = title.trim()
+    if (!file) return setError('Choose a PDF to add.')
     if (!cleanTitle) return setError('A title is required.')
+    if (!contentHash) return setError('Still fingerprinting the file. Give it a moment.')
 
-    let hash = contentHash.trim()
-    if (!hash) hash = await sha256Hex(`${cleanTitle}|${author.trim()}`)
-    if (!HASH_RE.test(hash)) {
-      return setError('Content hash must be a 64-character hex SHA-256 string.')
-    }
+    const ctrl = new AbortController()
+    abortRef.current = ctrl
+    let bookId = createdId
 
-    // Backend requires a positive size; for the phase-1 demo fall back to the title's byte length.
-    const size = fileSize.trim() ? Number(fileSize) : new TextEncoder().encode(cleanTitle).length
-    if (!Number.isFinite(size) || size <= 0) return setError('File size must be a positive number.')
-
-    const pages = pageCount.trim() ? Number(pageCount) : undefined
-    if (pages !== undefined && (!Number.isInteger(pages) || pages <= 0)) {
-      return setError('Page count must be a positive whole number.')
-    }
-
-    setBusy(true)
     try {
-      await booksApi.create({
-        title: cleanTitle,
-        author: author.trim() || undefined,
-        contentHash: hash.toLowerCase(),
-        fileSizeBytes: Math.round(size),
-        pageCount: pages,
-      })
-      navigate('/library')
+      // 1. create (skipped when a previous attempt already created the record)
+      if (!bookId) {
+        setPhase('creating')
+        const book = await booksApi.create({
+          title: cleanTitle,
+          author: author.trim() || undefined,
+          contentHash,
+          fileSizeBytes: file.size,
+        })
+        bookId = book.id
+        setCreatedId(book.id)
+      }
+
+      // 2. upload the PDF (server verifies it matches the hash and deletes it after processing)
+      setPhase('uploading')
+      await booksApi.uploadFile(bookId, file)
+
+      // 3. process, then poll
+      setPhase('processing')
+      setStatus(await booksApi.process(bookId))
+      await pollUntilDone(bookId, setStatus, ctrl.signal)
+
+      // Ready, FAILED or NEEDS_OCR: the detail page shows the outcome and how to retry
+      navigate(`/library/${bookId}`)
     } catch (err) {
-      setError(errorMessage(err))
-      setBusy(false)
+      if (err instanceof DOMException && err.name === 'AbortError') return
+      if (err instanceof ApiError && err.code === 'BOOK_DUPLICATE') {
+        const match = /id (\S+)$/.exec(err.message)
+        setDuplicateId(match ? match[1] : null)
+        setError('This exact file is already in your library.')
+      } else {
+        setError(errorMessage(err))
+      }
+      setPhase('idle')
     }
   }
+
+  const phaseLabel =
+    phase === 'hashing'
+      ? 'Fingerprinting file\u2026'
+      : phase === 'creating'
+        ? 'Creating book\u2026'
+        : phase === 'uploading'
+          ? 'Uploading\u2026'
+          : phase === 'processing'
+            ? status
+              ? `${STAGE_LABEL[status.stage]}\u2026`
+              : 'Starting\u2026'
+            : ''
 
   return (
     <div className="narrow">
       <Link to="/library" className="back">
-        ← Library
+        {'\u2190'} Library
       </Link>
       <header className="page-head page-head--stack">
         <p className="eyebrow">New book</p>
         <h1 className="page-title">Add a book</h1>
         <p className="lede">
-          File upload is coming soon. For now, enter the details and a content hash — or let us
-          generate one from the title for a demo.
+          Choose a PDF. We fingerprint it in your browser, upload it just long enough to read it, then
+          delete the file and keep only searchable passages.
         </p>
       </header>
 
       <form className="form form--card" onSubmit={onSubmit}>
         <Alert>{error}</Alert>
+        {duplicateId && (
+          <p className="hint">
+            <Link to={`/library/${duplicateId}`}>Open the existing book</Link>
+          </p>
+        )}
+
+        <div className="field">
+          <span className="field__label">PDF file</span>
+          <input
+            ref={fileInput}
+            className="file-input"
+            type="file"
+            accept="application/pdf,.pdf"
+            disabled={busy}
+            onChange={onPickFile}
+          />
+          {file && (
+            <p className="hint">
+              {file.name} {'\u00B7'} {formatSize(file.size)}
+              {contentHash && (
+                <>
+                  {' '}
+                  {'\u00B7'} <span className="mono hint__hash">SHA-256 {contentHash.slice(0, 12)}{'\u2026'}</span>
+                </>
+              )}
+            </p>
+          )}
+        </div>
 
         <label className="field">
           <span className="field__label">Title</span>
@@ -86,6 +190,7 @@ export function AddBookPage() {
             required
             maxLength={300}
             value={title}
+            disabled={busy}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="The Left Hand of Darkness"
           />
@@ -98,63 +203,32 @@ export function AddBookPage() {
           <input
             maxLength={200}
             value={author}
+            disabled={busy}
             onChange={(e) => setAuthor(e.target.value)}
             placeholder="Ursula K. Le Guin"
           />
         </label>
 
-        <div className="field-row">
-          <label className="field">
-            <span className="field__label">
-              Pages <span className="field__opt">optional</span>
-            </span>
-            <input
-              type="number"
-              inputMode="numeric"
-              min={1}
-              value={pageCount}
-              onChange={(e) => setPageCount(e.target.value)}
-              placeholder="304"
-            />
-          </label>
-          <label className="field">
-            <span className="field__label">
-              File size (bytes) <span className="field__opt">optional</span>
-            </span>
-            <input
-              type="number"
-              inputMode="numeric"
-              min={1}
-              value={fileSize}
-              onChange={(e) => setFileSize(e.target.value)}
-              placeholder="2400000"
-            />
-          </label>
-        </div>
-
-        <label className="field">
-          <span className="field__label">
-            Content hash <span className="field__opt">SHA-256, 64 hex chars</span>
-          </span>
-          <input
-            className="mono"
-            spellCheck={false}
-            autoComplete="off"
-            value={contentHash}
-            onChange={(e) => setContentHash(e.target.value)}
-            placeholder="Leave blank to auto-generate from the title"
-          />
-          <button type="button" className="link-btn field__action" onClick={generateHash}>
-            Generate from title
-          </button>
-        </label>
+        {phase !== 'idle' && (
+          <div className="progress-block" aria-live="polite">
+            <div className="progress">
+              <div
+                className="progress__bar"
+                style={{
+                  width: `${phase === 'processing' ? Math.max(status?.progress ?? 0, 3) : phase === 'uploading' ? 5 : 2}%`,
+                }}
+              />
+            </div>
+            <p className="hint">{phaseLabel}</p>
+          </div>
+        )}
 
         <div className="form__actions">
           <Link to="/library" className="btn btn--ghost">
             Cancel
           </Link>
-          <button className="btn btn--primary" type="submit" disabled={busy}>
-            {busy ? 'Adding…' : 'Add to library'}
+          <button className="btn btn--primary" type="submit" disabled={busy || !file || !contentHash}>
+            {busy ? 'Working\u2026' : 'Add to library'}
           </button>
         </div>
       </form>
