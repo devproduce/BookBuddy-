@@ -45,6 +45,11 @@ dependencies {
     testAnnotationProcessor 'org.projectlombok:lombok'
 }
 
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
 tasks.named('test') {
+    jvmArgs '-Dfile.encoding=UTF-8'
     useJUnitPlatform()
 }

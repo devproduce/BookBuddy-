@@ -66,7 +66,10 @@ public class BookService {
         return BookResponse.from(bookRepository.save(book));
     }
 
-    /** Cascade (chunks, uploaded file) will be added in a later phase; currently only removes the book. */
+    /**
+     * Removes only the book document. Use {@code IngestionJobService#deleteBookCascade} to also remove its chunks,
+     * ingestion jobs and pending upload.
+     */
     public void delete(String userId, String bookId) {
         BookDocument book = find(userId, bookId);
         bookRepository.delete(book);

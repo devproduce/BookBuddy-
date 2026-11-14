@@ -25,6 +25,15 @@ public record BookBuddyProperties(
         if (groq == null) {
             groq = new Groq("", "https://api.groq.com/openai/v1", List.of(), "");
         }
+        if (embedding == null) {
+            embedding = new Embedding(false, "models/model.onnx", "models/tokenizer.json", 384, 512);
+        }
+        if (ingestion == null) {
+            ingestion = new Ingestion("uploads", 800, 40, 350, 60);
+        }
+        if (vector == null) {
+            vector = new Vector("book_chunks_vector_index", 8, 5, 0.35, "atlas");
+        }
         if (safety == null) {
             safety = new Safety(List.of());
         }
@@ -54,7 +63,18 @@ public record BookBuddyProperties(
     public record Ingestion(
             String uploadDir, int maxPages, int minCharsPerPage, int chunkTokens, int chunkOverlapTokens) {}
 
-    public record Vector(String indexName, int topN, int topK, double minSimilarity) {}
+    public record Vector(String indexName, int topN, int topK, double minSimilarity, String mode) {
+        public Vector {
+            if (mode == null || mode.isBlank()) {
+                mode = "atlas";
+            }
+        }
+
+        /** True when vector search must skip Atlas {@code $vectorSearch} and use the in-process brute-force path. */
+        public boolean memoryOnly() {
+            return "memory".equalsIgnoreCase(mode);
+        }
+    }
 
     public record Safety(List<CrisisResource> crisisResources) {
         public Safety {

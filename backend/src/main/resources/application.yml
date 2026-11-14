@@ -55,6 +55,8 @@ bookbuddy:
     top-n: 8
     top-k: 5
     min-similarity: 0.35
+    # atlas = try $vectorSearch then fall back to brute-force cosine; memory = brute-force only
+    mode: ${VECTOR_MODE:atlas}
   safety:
     crisis-resources:
       - name: Tele-MANAS
