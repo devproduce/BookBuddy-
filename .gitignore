@@ -15,7 +15,8 @@ backend/bin/
 backend/.idea/
 *.class
 *.jar
-!gradle/wrapper/gradle-wrapper.jar
+!backend/gradle/wrapper/gradle-wrapper.jar
+!**/gradle-wrapper.jar
 backend/tmp/
 backend/uploads/
 backend/models/*.onnx
