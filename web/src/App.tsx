@@ -3,6 +3,7 @@ import { ProtectedRoute, PublicOnlyRoute } from './auth/ProtectedRoute'
 import { AppShell } from './components/AppShell'
 import { AddBookPage } from './pages/AddBookPage'
 import { BookDetailPage } from './pages/BookDetailPage'
+import { ChatPage } from './pages/ChatPage'
 import { ComingSoonPage, NotFoundPage } from './pages/ComingSoonPage'
 import { HomePage } from './pages/HomePage'
 import { LibraryPage } from './pages/LibraryPage'
@@ -24,15 +25,8 @@ export default function App() {
           <Route path="library" element={<LibraryPage />} />
           <Route path="library/add" element={<AddBookPage />} />
           <Route path="library/:id" element={<BookDetailPage />} />
-          <Route
-            path="chat"
-            element={
-              <ComingSoonPage
-                title="Talk to Book Buddy"
-                blurb="Conversations about your books are being written. Add a few titles to your library while you wait."
-              />
-            }
-          />
+          {/* one route for /chat and /chat/:id so switching conversations keeps the page (and any live stream) mounted */}
+          <Route path="chat/:conversationId?" element={<ChatPage />} />
           <Route
             path="memory"
             element={

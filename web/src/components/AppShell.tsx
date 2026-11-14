@@ -52,7 +52,7 @@ function Icon({ name }: { name: 'home' | 'library' | 'chat' | 'memory' | 'settin
 const NAV = [
   { to: '/', label: 'Home', icon: 'home', end: true },
   { to: '/library', label: 'Library', icon: 'library' },
-  { to: '/chat', label: 'Chat', icon: 'chat', soon: true },
+  { to: '/chat', label: 'Chat', icon: 'chat' },
   { to: '/memory', label: 'Memory', icon: 'memory', soon: true },
   { to: '/settings', label: 'Settings', icon: 'settings' },
 ] as const
@@ -99,7 +99,7 @@ export function AppShell() {
       </aside>
       <main className="shell__main">
         {/* key re-mounts the wrapper so the enter animation replays per route */}
-        <div className="page" key={location.pathname}>
+        <div className="page" key={location.pathname.startsWith('/chat') ? '/chat' : location.pathname}>
           <Outlet />
         </div>
       </main>

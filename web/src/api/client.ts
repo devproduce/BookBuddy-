@@ -50,6 +50,20 @@ interface RequestOptions {
   signal?: AbortSignal
 }
 
+function toApiError(res: Response, data: unknown, skipAuthRedirect = false): ApiError {
+  const parsed = data as Partial<ApiErrorBody> | undefined
+  const retryAfterHeader = Number(res.headers.get('Retry-After'))
+  const error = new ApiError(res.status, {
+    code: parsed?.code ?? `HTTP_${res.status}`,
+    message: parsed?.message ?? res.statusText ?? 'Something went wrong.',
+    retryable: parsed?.retryable ?? res.status >= 500,
+    retryAfterSeconds:
+      parsed?.retryAfterSeconds ?? (Number.isFinite(retryAfterHeader) && retryAfterHeader > 0 ? retryAfterHeader : null),
+  })
+  if (res.status === 401 && !skipAuthRedirect) onUnauthorized?.()
+  return error
+}
+
 async function request<T>(
   method: string,
   path: string,
@@ -90,17 +104,7 @@ async function request<T>(
   }
 
   if (!res.ok) {
-    const parsed = data as Partial<ApiErrorBody> | undefined
-    const retryAfterHeader = Number(res.headers.get('Retry-After'))
-    const error = new ApiError(res.status, {
-      code: parsed?.code ?? `HTTP_${res.status}`,
-      message: parsed?.message ?? res.statusText ?? 'Something went wrong.',
-      retryable: parsed?.retryable ?? res.status >= 500,
-      retryAfterSeconds:
-        parsed?.retryAfterSeconds ?? (Number.isFinite(retryAfterHeader) && retryAfterHeader > 0 ? retryAfterHeader : null),
-    })
-    if (res.status === 401 && !skipAuthRedirect) onUnauthorized?.()
-    throw error
+    throw toApiError(res, data, skipAuthRedirect)
   }
 
   return data as T
@@ -114,5 +118,50 @@ export const api = {
     request<T>('POST', path, { ...opts, formData }),
   patch: <T>(path: string, body?: unknown, opts?: RequestOptions) =>
     request<T>('PATCH', path, { ...opts, body }),
+  put: <T>(path: string, body?: unknown, opts?: RequestOptions) =>
+    request<T>('PUT', path, { ...opts, body }),
   delete: <T = void>(path: string, opts?: RequestOptions) => request<T>('DELETE', path, opts),
+}
+
+/**
+ * Opens a POST that answers with Server-Sent Events. Resolves with the live Response once the server accepted the
+ * request (2xx); non-2xx answers are turned into an {@link ApiError} exactly like regular calls.
+ */
+export async function openEventStream(
+  path: string,
+  body: unknown,
+  signal?: AbortSignal,
+): Promise<Response> {
+  const headers: Record<string, string> = { Accept: 'text/event-stream' }
+  const token = tokenStore.get()
+  if (token) headers.Authorization = `Bearer ${token}`
+  if (body !== undefined) headers['Content-Type'] = 'application/json'
+
+  let res: Response
+  try {
+    res = await fetch(`${API_BASE_URL}${path}`, {
+      method: 'POST',
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal,
+    })
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') throw err
+    throw new ApiError(0, {
+      code: 'NETWORK_ERROR',
+      message: "Can't reach Book Buddy right now. Check your connection and try again.",
+      retryable: true,
+    })
+  }
+  if (!res.ok) {
+    const text = await res.text()
+    let data: unknown = undefined
+    try {
+      data = text ? JSON.parse(text) : undefined
+    } catch {
+      data = undefined
+    }
+    throw toApiError(res, data)
+  }
+  return res
 }

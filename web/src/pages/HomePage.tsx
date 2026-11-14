@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { chatApi, type Conversation } from '../api/chat'
 import { BrandHero } from '../components/BrandMark'
 import { useAuth } from '../auth/useAuth'
 
@@ -13,6 +15,16 @@ function greeting(): string {
 export function HomePage() {
   const { user } = useAuth()
   const name = user?.displayName?.split(' ')[0]
+  const [recent, setRecent] = useState<Conversation[] | null>(null)
+
+  useEffect(() => {
+    const ctrl = new AbortController()
+    chatApi
+      .list(4, null, ctrl.signal)
+      .then((page) => setRecent(page.items))
+      .catch(() => setRecent([]))
+    return () => ctrl.abort()
+  }, [])
 
   return (
     <div className="home">
@@ -54,19 +66,28 @@ export function HomePage() {
         <section className="panel">
           <header className="panel__head">
             <h2>Recent conversations</h2>
-            <span className="tag">Soon</span>
+            <Link to="/chat" className="link-btn">
+              New chat
+            </Link>
           </header>
-          <ul className="placeholder-list" aria-hidden="true">
-            {[0, 1, 2].map((i) => (
-              <li key={i}>
-                <span className="dot" />
-                <span className="bar" style={{ width: `${80 - i * 15}%` }} />
-              </li>
-            ))}
-          </ul>
-          <p className="panel__note">
-            Your chats with Book Buddy will gather here, so you can return to any thread.
-          </p>
+          {recent && recent.length > 0 ? (
+            <ul className="recent-list">
+              {recent.map((c) => (
+                <li key={c.id}>
+                  <Link to={`/chat/${c.id}`} className="recent-list__item">
+                    <span className="recent-list__title">{c.title}</span>
+                    {c.incognito && <span className="conv__badge">Incognito</span>}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="panel__note">
+              {recent === null
+                ? 'Loading…'
+                : 'Your chats with Book Buddy will gather here, so you can return to any thread.'}
+            </p>
+          )}
         </section>
       </div>
     </div>
