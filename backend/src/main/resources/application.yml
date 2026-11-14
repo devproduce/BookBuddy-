@@ -1,0 +1,75 @@
+server:
+  port: ${PORT:8080}
+  error:
+    include-message: never
+
+spring:
+  application:
+    name: bookbuddy
+  data:
+    mongodb:
+      uri: ${MONGODB_URI:mongodb://localhost:27017/bookbuddy}
+      auto-index-creation: true
+  servlet:
+    multipart:
+      max-file-size: ${MAX_UPLOAD_MB:50}MB
+      max-request-size: ${MAX_UPLOAD_MB:50}MB
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when_authorized
+
+bookbuddy:
+  cors:
+    allowed-origins: ${CORS_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
+  jwt:
+    secret: ${JWT_SECRET:change-me-to-a-long-random-secret-at-least-32-chars}
+    expiration-ms: ${JWT_EXPIRATION_MS:604800000}
+  groq:
+    api-key: ${GROQ_API_KEY:}
+    base-url: ${GROQ_BASE_URL:https://api.groq.com/openai/v1}
+    allowed-models: ${GROQ_ALLOWED_MODELS:openai/gpt-oss-20b,llama-3.3-70b-versatile}
+    default-model: ${GROQ_MODEL:openai/gpt-oss-20b}
+  embedding:
+    enabled: ${EMBEDDING_ENABLED:false}
+    model-path: ${EMBEDDING_MODEL_PATH:models/model.onnx}
+    tokenizer-path: ${EMBEDDING_TOKENIZER_PATH:models/tokenizer.json}
+    dimension: 384
+    max-tokens: 512
+  ingestion:
+    upload-dir: ${UPLOAD_DIR:uploads}
+    max-pages: ${MAX_PAGES:800}
+    min-chars-per-page: ${MIN_CHARS_PER_PAGE:40}
+    chunk-tokens: 350
+    chunk-overlap-tokens: 60
+  vector:
+    index-name: ${VECTOR_INDEX_NAME:book_chunks_vector_index}
+    top-n: 8
+    top-k: 5
+    min-similarity: 0.35
+  safety:
+    crisis-resources:
+      - name: Tele-MANAS
+        phone: "14416"
+      - name: KIRAN
+        phone: "1800-599-0019"
+      - name: Emergency
+        phone: "112"
+  quota:
+    daily-request-soft-limit: ${LLM_DAILY_SOFT_LIMIT:900}
+  prompt:
+    chat-system-id: chat.system.v1
+
+logging:
+  level:
+    root: INFO
+    com.bookbuddy: INFO
+    org.springframework.data.mongodb: WARN

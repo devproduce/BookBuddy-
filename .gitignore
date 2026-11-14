@@ -48,3 +48,8 @@ Thumbs.db
 # Eval / local data
 docs/spikes/results/*.json
 !docs/spikes/results/.gitkeep
+
+tools/
+gradle-dist.zip
+backend-starter.zip
+
