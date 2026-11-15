@@ -8,4 +8,6 @@ public interface IngestionJobRepository extends MongoRepository<IngestionJobDocu
     Optional<IngestionJobDocument> findFirstByBookIdAndUserIdOrderByCreatedAtDesc(String bookId, String userId);
 
     long deleteByBookId(String bookId);
+
+    long deleteByUserId(String userId);
 }

@@ -8,7 +8,8 @@ import java.util.List;
 
 /**
  * Transport-neutral chat events. {@link ConversationService} produces them; the SSE controller serialises them as
- * {@code meta}, {@code token}, {@code citations}, {@code safety}, {@code done} and {@code error} events.
+ * {@code meta}, {@code token}, {@code citations}, {@code memory}, {@code safety}, {@code done} and {@code error}
+ * events.
  */
 public final class ChatEvents {
 
@@ -35,6 +36,9 @@ public final class ChatEvents {
         void citations(List<MessageCitation> citations);
 
         void safety(Safety safety);
+
+        /** Ids of the memories that were part of the prompt ("why this answer"). Optional for sinks. */
+        default void memory(List<String> memoryIds) {}
 
         void done(Done done);
 

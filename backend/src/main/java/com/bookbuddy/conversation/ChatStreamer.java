@@ -27,6 +27,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
  * event: meta       data: {"messageId","userMessageId","conversationId"}
  * event: token      data: {"text"}                         (repeated)
  * event: citations  data: {"citations":[...]}
+ * event: memory     data: {"memoryIds":[...]}               (memories that shaped the reply, when any)
  * event: safety     data: {"level","resources":[{"name","phone","personal"}]}
  * event: done       data: {"messageId","status","content","usage","modelId"}
  * event: error      data: {"code","message","retryable","messageId"}
@@ -130,6 +131,11 @@ public class ChatStreamer {
         @Override
         public void safety(ChatEvents.Safety safety) {
             send("safety", safety);
+        }
+
+        @Override
+        public void memory(List<String> memoryIds) {
+            send("memory", Map.of("memoryIds", memoryIds));
         }
 
         @Override

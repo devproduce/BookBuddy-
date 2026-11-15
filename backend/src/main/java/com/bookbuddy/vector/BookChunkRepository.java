@@ -14,4 +14,6 @@ public interface BookChunkRepository extends MongoRepository<BookChunkDocument, 
     long countByBookId(String bookId);
 
     long deleteByBookId(String bookId);
+
+    long deleteByUserId(String userId);
 }

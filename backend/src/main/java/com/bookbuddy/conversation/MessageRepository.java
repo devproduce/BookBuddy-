@@ -23,4 +23,11 @@ public interface MessageRepository extends MongoRepository<MessageDocument, Stri
     long countByConversationId(String conversationId);
 
     void deleteByConversationId(String conversationId);
+
+    /** Whole conversation in reading order (data export). */
+    List<MessageDocument> findByConversationIdAndUserIdOrderByCreatedAtAscIdAsc(String conversationId, String userId);
+
+    long deleteByUserId(String userId);
+
+    long countByUserId(String userId);
 }

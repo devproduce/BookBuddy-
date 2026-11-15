@@ -53,6 +53,13 @@ public class ConversationDocument {
     private String lastSummarizedMessageId;
 
     private String summary;
+
+    /** Newest message already mined for memories; messages after this instant are still to be looked at. */
+    private Instant lastMemoryExtractedAt;
+
+    /** {@code messageCount} at the last memory extraction (or skip), to tell how much is new. */
+    private int lastExtractedMessageCount;
+
     private Instant createdAt;
     private Instant updatedAt;
 

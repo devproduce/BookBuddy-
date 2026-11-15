@@ -47,6 +47,10 @@ import com.bookbuddy.conversation.MessageDocument.Status;
 import com.bookbuddy.document.SectionType;
 import com.bookbuddy.document.TextCleaningService;
 import com.bookbuddy.embedding.HashEmbeddingProvider;
+import com.bookbuddy.memory.MemoryContext;
+import com.bookbuddy.memory.MemoryExtractionService;
+import com.bookbuddy.memory.MemoryRetrievalService;
+import com.bookbuddy.quota.LlmBudgetService;
 import com.bookbuddy.rag.QuoteVerifier;
 import com.bookbuddy.rag.RagService;
 import com.bookbuddy.safety.CrisisResponseService;
@@ -81,6 +85,9 @@ class ConversationServiceTest {
     private final LlmProvider llm = mock(LlmProvider.class);
     private final RollingSummaryService summaries = mock(RollingSummaryService.class);
     private final SafetyEventLogger safetyLogger = mock(SafetyEventLogger.class);
+    private final MemoryRetrievalService memoryRetrieval = mock(MemoryRetrievalService.class);
+    private final MemoryExtractionService memoryExtraction = mock(MemoryExtractionService.class);
+    private final LlmBudgetService budget = mock(LlmBudgetService.class);
 
     private final List<MessageDocument> store = new ArrayList<>();
     private final AtomicInteger ids = new AtomicInteger();
@@ -104,8 +111,9 @@ class ConversationServiceTest {
         service = new ConversationService(
                 conversations, messages, users, books, rag, llm,
                 new RiskClassifier(llm), new CrisisResponseService(props), safetyLogger, verifier,
-                new IntentRouter(), new PromptLoader(props), summaries);
+                new IntentRouter(), new PromptLoader(props), summaries, memoryRetrieval, memoryExtraction, budget);
         service.setWordDelayMs(0);
+        when(memoryRetrieval.retrieve(anyString(), anyString())).thenReturn(MemoryContext.EMPTY);
 
         user = new UserDocument();
         user.setId(USER);
@@ -192,6 +200,14 @@ class ConversationServiceTest {
         public void safety(Safety s) {
             safety = s;
             events.add("safety");
+        }
+
+        List<String> memoryIds;
+
+        @Override
+        public void memory(List<String> ids) {
+            memoryIds = ids;
+            events.add("memory");
         }
 
         @Override
@@ -745,6 +761,62 @@ class ConversationServiceTest {
     }
 
     @SuppressWarnings("unchecked")
+    // ---------------------------------------------------------------------------------------------------------
+    // memory
+    // ---------------------------------------------------------------------------------------------------------
+
+    @Test
+    void memoriesAreInjectedIntoThePromptAndRecordedOnTheAssistantMessage() {
+        llmStreams("Happy to help.");
+        when(memoryRetrieval.retrieve(USER, "recommend something")).thenReturn(new MemoryContext(
+                "# What you know about this user\n- [stated] Loves cosy mysteries", List.of("mem1", "mem2"), 20));
+
+        Recorder rec = run("recommend something");
+
+        assertTrue(promptCaptor().getValue().get(0).content().contains("Loves cosy mysteries"));
+        assertEquals(List.of("mem1", "mem2"), stored(Role.ASSISTANT).get(0).getMemoryIdsUsed());
+        assertEquals(List.of("mem1", "mem2"), rec.memoryIds);
+        assertTrue(rec.events.indexOf("memory") < rec.events.indexOf("done"));
+    }
+
+    @Test
+    void noMemoriesMeansNoMemoryEventAndAnEmptyList() {
+        llmStreams("Hello.");
+        Recorder rec = run("hi there");
+        assertTrue(stored(Role.ASSISTANT).get(0).getMemoryIdsUsed().isEmpty());
+        assertFalse(rec.events.contains("memory"));
+        assertFalse(promptCaptor().getValue().get(0).content().contains("What you know about this user"));
+    }
+
+    @Test
+    void offlineRepliesNeverReadOrClaimMemories() {
+        // llm.isConfigured() is false in setUp
+        run("hello offline");
+        verify(memoryRetrieval, never()).retrieve(anyString(), anyString());
+        assertTrue(stored(Role.ASSISTANT).get(0).getMemoryIdsUsed().isEmpty());
+    }
+
+    @Test
+    void crisisReplyUsesNoMemories() {
+        when(llm.isConfigured()).thenReturn(true);
+        run("I want to kill myself");
+        verify(memoryRetrieval, never()).retrieve(anyString(), anyString());
+    }
+
+    @Test
+    void completedTurnsQueueMemoryExtractionButNeverBlockTheReply() {
+        llmStreams("Sure.");
+        run("tell me something");
+        verify(memoryExtraction).onTurnCompleted(user, conversation);
+    }
+
+    @Test
+    void chatCallsAreCountedAgainstTheSharedBudget() {
+        llmStreams("Sure.");
+        run("tell me something");
+        verify(budget).record(eq(USER), eq(LlmBudgetService.Priority.CHAT), eq("test-model"), any(), org.mockito.ArgumentMatchers.anyLong(), eq(true));
+    }
+
     private ArgumentCaptor<List<ChatMessage>> promptCaptor() {
         ArgumentCaptor<List<ChatMessage>> captor = ArgumentCaptor.forClass(List.class);
         verify(llm, org.mockito.Mockito.atLeastOnce()).streamChat(captor.capture(), any(), any(), any());

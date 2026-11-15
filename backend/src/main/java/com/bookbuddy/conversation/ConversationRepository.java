@@ -22,4 +22,12 @@ public interface ConversationRepository extends MongoRepository<ConversationDocu
             String userId, Instant updatedAt, String id, Limit limit);
 
     long deleteByIdAndUserId(String id, String userId);
+
+    /** Every conversation of a user (data export / account deletion). */
+    List<ConversationDocument> findByUserId(String userId);
+
+    long deleteByUserId(String userId);
+
+    /** Non-incognito conversations last touched within {@code [from, to]}: candidates for idle memory extraction. */
+    List<ConversationDocument> findByIncognitoFalseAndUpdatedAtBetween(Instant from, Instant to, Limit limit);
 }

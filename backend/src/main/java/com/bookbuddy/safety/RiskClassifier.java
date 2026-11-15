@@ -1,6 +1,7 @@
 package com.bookbuddy.safety;
 
 import com.bookbuddy.ai.LlmProvider;
+import com.bookbuddy.quota.LlmBudgetService;
 import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.List;
@@ -9,6 +10,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -38,6 +40,7 @@ public class RiskClassifier {
     private static final int LLM_MAX_CHARS = 1200;
 
     private final LlmProvider llm;
+    private volatile LlmBudgetService budget;
 
     public RiskClassifier(LlmProvider llm) {
         this.llm = llm;
@@ -56,12 +59,29 @@ public class RiskClassifier {
         if (!DISTRESS_HINT.matcher(normalize(text)).find()) {
             return byRules;
         }
+        long started = System.currentTimeMillis();
         try {
-            RiskLevel byLlm = parseLlm(llm.complete(LLM_SYSTEM, truncate(text.strip())));
+            String reply = llm.complete(LLM_SYSTEM, truncate(text.strip()));
+            recordUsage(true, started);
+            RiskLevel byLlm = parseLlm(reply);
             return RiskLevel.max(byRules, byLlm);
         } catch (RuntimeException e) {
+            recordUsage(false, started);
             log.debug("LLM safety check unavailable ({}); using rule result", e.getClass().getSimpleName());
             return byRules;
+        }
+    }
+
+    /** Optional: counts safety calls against the shared LLM quota (they are never refused). */
+    @Autowired(required = false)
+    public void setBudget(LlmBudgetService budget) {
+        this.budget = budget;
+    }
+
+    private void recordUsage(boolean ok, long startedMillis) {
+        LlmBudgetService b = budget;
+        if (b != null) {
+            b.record(null, LlmBudgetService.Priority.SAFETY, null, null, System.currentTimeMillis() - startedMillis, ok);
         }
     }
 

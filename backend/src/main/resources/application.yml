@@ -69,6 +69,25 @@ bookbuddy:
     daily-request-soft-limit: ${LLM_DAILY_SOFT_LIMIT:900}
   prompt:
     chat-system-id: chat.system.v1
+  memory:
+    # queue extraction after this many new messages, or when a conversation has been idle this many minutes
+    extract-every-messages: 6
+    idle-minutes: 10
+    emotional-context-days: 14
+    core-profile-tokens: 150
+    memory-tokens: 350
+    max-memories-per-prompt: 8
+    max-candidates-per-run: 8
+    min-similarity: 0.35
+    duplicate-similarity: 0.90
+    merge-similarity: 0.75
+    recency-half-life-days: 45
+    max-rebuild-calls: 20
+    consolidate-above: 60
+  jobs:
+    enabled: ${JOBS_ENABLED:true}
+    poll-ms: 5000
+    initial-delay-ms: 15000
 
 logging:
   level:

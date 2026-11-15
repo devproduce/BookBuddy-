@@ -28,6 +28,11 @@ import com.bookbuddy.conversation.IntentRouter.Intent;
 import com.bookbuddy.conversation.MessageDocument.InputMode;
 import com.bookbuddy.conversation.MessageDocument.Role;
 import com.bookbuddy.conversation.MessageDocument.Status;
+import com.bookbuddy.memory.MemoryContext;
+import com.bookbuddy.memory.MemoryExtractionService;
+import com.bookbuddy.memory.MemoryRetrievalService;
+import com.bookbuddy.quota.LlmBudgetService;
+import com.bookbuddy.quota.LlmBudgetService.Priority;
 import com.bookbuddy.rag.QuoteVerifier;
 import com.bookbuddy.rag.RagDtos.Citation;
 import com.bookbuddy.rag.RagService;
@@ -94,6 +99,9 @@ public class ConversationService {
     private final IntentRouter intentRouter;
     private final PromptLoader prompts;
     private final RollingSummaryService summaries;
+    private final MemoryRetrievalService memoryRetrieval;
+    private final MemoryExtractionService memoryExtraction;
+    private final LlmBudgetService budget;
 
     /** Pause between words when streaming an offline (extractive) answer. */
     private volatile long wordDelayMs = 18;
@@ -111,7 +119,10 @@ public class ConversationService {
             QuoteVerifier quoteVerifier,
             IntentRouter intentRouter,
             PromptLoader prompts,
-            RollingSummaryService summaries) {
+            RollingSummaryService summaries,
+            MemoryRetrievalService memoryRetrieval,
+            MemoryExtractionService memoryExtraction,
+            LlmBudgetService budget) {
         this.conversations = conversations;
         this.messages = messages;
         this.users = users;
@@ -125,6 +136,9 @@ public class ConversationService {
         this.intentRouter = intentRouter;
         this.prompts = prompts;
         this.summaries = summaries;
+        this.memoryRetrieval = memoryRetrieval;
+        this.memoryExtraction = memoryExtraction;
+        this.budget = budget;
     }
 
     void setWordDelayMs(long wordDelayMs) {
@@ -206,6 +220,9 @@ public class ConversationService {
         ConversationDocument c = find(userId, id);
         messages.deleteByConversationId(c.getId());
         conversations.deleteById(c.getId());
+        if (memoryExtraction != null) {
+            memoryExtraction.onConversationDeleted(userId, c.getId()); // memories forget their source
+        }
     }
 
     public CursorPage<MessageResponse> listMessages(String userId, String conversationId, Integer limit, String cursor) {
@@ -410,7 +427,8 @@ public class ConversationService {
         Retrieval retrieval = retrieve ? rag.retrieve(userId, question, conversation.scopedBookIds()) : null;
         boolean hasPassages = retrieval != null && !retrieval.isEmpty();
 
-        List<ChatMessage> prompt = buildPrompt(turn, level, scope, retrieve, retrieval);
+        MemoryContext memory = llm.isConfigured() ? recall(userId, question) : MemoryContext.EMPTY;
+        List<ChatMessage> prompt = buildPrompt(turn, level, scope, retrieve, retrieval, memory);
         StringBuilder out = new StringBuilder();
         String modelId = null;
         TokenUsage usage = null;
@@ -425,6 +443,8 @@ public class ConversationService {
             streamWords(RagService.NO_ANSWER, out, sink, cancel);
             modelId = OFFLINE_MODEL;
         } else if (llm.isConfigured()) {
+            assistant.setMemoryIdsUsed(new ArrayList<>(memory.memoryIds()));
+            long started = System.currentTimeMillis();
             try {
                 StreamResult result = llm.streamChat(prompt, ChatOptions.defaults(), token -> {
                     out.append(token);
@@ -434,11 +454,14 @@ public class ConversationService {
                     modelId = result.modelId();
                     usage = result.usage();
                 }
+                recordChatUsage(userId, modelId, usage, prompt, out, started, true);
             } catch (LlmException e) {
                 log.warn("LLM stream failed ({}); tokens delivered: {}", e.getMessage(), out.length() > 0);
+                recordChatUsage(userId, modelId, null, prompt, out, started, false);
                 if (out.length() > 0) {
                     failedMidStream = true;
                 } else if (hasPassages) {
+                    assistant.setMemoryIdsUsed(new ArrayList<>()); // the model never saw them
                     streamWords(rag.extractiveAnswer(question, retrieval.chunks(), retrieval.citations()),
                             out, sink, cancel);
                     modelId = OFFLINE_MODEL;
@@ -489,6 +512,9 @@ public class ConversationService {
         assistant.setTokenUsage(usage);
         assistant = messages.save(assistant);
         finishTurn(turn, replaced);
+        if (assistant.getMemoryIdsUsed() != null && !assistant.getMemoryIdsUsed().isEmpty()) {
+            sink.memory(List.copyOf(assistant.getMemoryIdsUsed()));
+        }
         sink.done(new Done(assistant.getId(), Status.COMPLETE, finalText, usage, modelId));
         return assistant;
     }
@@ -514,6 +540,31 @@ public class ConversationService {
         } catch (RejectedExecutionException e) {
             log.debug("Summary skipped: executor busy");
         }
+        if (memoryExtraction != null) {
+            // queues a durable background job at most; extraction itself never runs on the reply path
+            memoryExtraction.onTurnCompleted(turn.user(), turn.conversation());
+        }
+    }
+
+    /** Memories for this message; memory is an enhancement, so any problem just means "no memories". */
+    private MemoryContext recall(String userId, String question) {
+        if (memoryRetrieval == null) {
+            return MemoryContext.EMPTY;
+        }
+        MemoryContext context = memoryRetrieval.retrieve(userId, question);
+        return context == null ? MemoryContext.EMPTY : context;
+    }
+
+    private void recordChatUsage(
+            String userId, String modelId, TokenUsage usage, List<ChatMessage> prompt, StringBuilder out,
+            long startedMillis, boolean ok) {
+        if (budget == null) {
+            return;
+        }
+        TokenUsage tokens = usage != null
+                ? usage
+                : TokenUsage.of(estimatePromptTokens(prompt), TokenEstimator.estimate(out.toString()), true);
+        budget.record(userId, Priority.CHAT, modelId, tokens, System.currentTimeMillis() - startedMillis, ok);
     }
 
     // ---------------------------------------------------------------------------------------------------------
@@ -521,7 +572,8 @@ public class ConversationService {
     // ---------------------------------------------------------------------------------------------------------
 
     List<ChatMessage> buildPrompt(
-            Turn turn, RiskLevel level, BookScope scope, boolean retrieve, Retrieval retrieval) {
+            Turn turn, RiskLevel level, BookScope scope, boolean retrieve, Retrieval retrieval,
+            MemoryContext memory) {
         ConversationDocument conversation = turn.conversation();
         String question = turn.userMessage().getContent();
 
@@ -542,6 +594,9 @@ public class ConversationService {
         if (conversation.getSummary() != null && !conversation.getSummary().isBlank()) {
             system.append("\n# Summary of earlier turns (context only)\n").append(conversation.getSummary().strip())
                     .append('\n');
+        }
+        if (memory != null && !memory.isEmpty()) {
+            system.append('\n').append(memory.promptBlock()).append('\n');
         }
 
         List<ChatMessage> prompt = new ArrayList<>();

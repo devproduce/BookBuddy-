@@ -5,13 +5,17 @@ import com.bookbuddy.ai.LlmProvider;
 import com.bookbuddy.config.AsyncConfig;
 import com.bookbuddy.conversation.MessageDocument.Role;
 import com.bookbuddy.conversation.MessageDocument.Status;
+import com.bookbuddy.ai.TokenUsage;
 import com.bookbuddy.document.TextCleaningService;
+import com.bookbuddy.quota.LlmBudgetService;
+import com.bookbuddy.quota.LlmBudgetService.Priority;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Limit;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -45,6 +49,7 @@ public class RollingSummaryService {
     private final TextCleaningService cleaning;
     private final Set<String> inFlight = ConcurrentHashMap.newKeySet();
     private volatile int thresholdTokens = DEFAULT_THRESHOLD_TOKENS;
+    private volatile LlmBudgetService budget;
 
     public RollingSummaryService(
             ConversationRepository conversations,
@@ -59,6 +64,12 @@ public class RollingSummaryService {
 
     void setThresholdTokens(int thresholdTokens) {
         this.thresholdTokens = thresholdTokens;
+    }
+
+    /** Optional: when present, summaries yield to chat and safety if the daily LLM budget runs low. */
+    @Autowired(required = false)
+    public void setBudget(LlmBudgetService budget) {
+        this.budget = budget;
     }
 
     /** Fire-and-forget; never throws into the chat path. */
@@ -132,7 +143,9 @@ public class RollingSummaryService {
     }
 
     private String summarize(String previous, List<MessageDocument> fold) {
-        if (llm.isConfigured()) {
+        LlmBudgetService b = budget;
+        if (llm.isConfigured() && (b == null || b.allows(Priority.SUMMARY))) {
+            long started = System.currentTimeMillis();
             try {
                 StringBuilder prompt = new StringBuilder();
                 prompt.append("Existing summary:\n")
@@ -144,10 +157,18 @@ public class RollingSummaryService {
                             .append('\n');
                 }
                 String out = llm.complete(SUMMARY_SYSTEM, prompt.toString());
+                if (b != null) {
+                    b.record(null, Priority.SUMMARY, null,
+                            TokenUsage.of(TokenEstimator.estimate(prompt.toString()), TokenEstimator.estimate(out), true),
+                            System.currentTimeMillis() - started, true);
+                }
                 if (out != null && !out.isBlank()) {
                     return clip(out.strip(), MAX_SUMMARY_CHARS);
                 }
             } catch (LlmException e) {
+                if (b != null) {
+                    b.record(null, Priority.SUMMARY, null, null, System.currentTimeMillis() - started, false);
+                }
                 log.debug("LLM summary failed ({}); using extractive fallback", e.getMessage());
             }
         }
