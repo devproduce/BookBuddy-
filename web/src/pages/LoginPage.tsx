@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Alert } from '../components/Alert'
 import { errorMessage } from '../components/errorMessage'
 import { useAuth } from '../auth/useAuth'
+import { strings } from '../i18n'
 import { AuthLayout } from './AuthLayout'
 
 export function LoginPage() {
@@ -11,6 +12,7 @@ export function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const t = strings.auth.login
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
@@ -27,41 +29,45 @@ export function LoginPage() {
 
   return (
     <AuthLayout>
-      <h2 className="auth__title">Welcome back</h2>
-      <p className="auth__sub">Sign in to pick up where you left off.</p>
+      <h2 className="auth__title">{t.title}</h2>
+      <p className="auth__sub">{t.subtitle}</p>
 
-      <form className="form" onSubmit={onSubmit} noValidate={false}>
+      <form className="form" onSubmit={onSubmit} noValidate={false} aria-busy={busy}>
         <Alert>{error}</Alert>
         <label className="field">
-          <span className="field__label">Email</span>
+          <span className="field__label">{t.email}</span>
           <input
             type="email"
+            name="email"
             autoComplete="email"
             inputMode="email"
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@example.com"
+            placeholder={t.emailPlaceholder}
+            aria-invalid={error ? true : undefined}
           />
         </label>
         <label className="field">
-          <span className="field__label">Password</span>
+          <span className="field__label">{t.password}</span>
           <input
             type="password"
+            name="password"
             autoComplete="current-password"
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="••••••••"
+            placeholder={t.passwordPlaceholder}
+            aria-invalid={error ? true : undefined}
           />
         </label>
         <button className="btn btn--primary btn--block" type="submit" disabled={busy}>
-          {busy ? 'Signing in…' : 'Sign in'}
+          {busy ? t.submitting : t.submit}
         </button>
       </form>
 
       <p className="auth__switch">
-        New to Book Buddy? <Link to="/register">Create an account</Link>
+        {t.newHere} <Link to="/register">{t.createAccount}</Link>
       </p>
     </AuthLayout>
   )

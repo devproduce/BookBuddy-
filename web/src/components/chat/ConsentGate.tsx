@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useCallback, useState, type ReactNode } from 'react'
 import { settingsApi } from '../../api/settings'
 import { useAuth } from '../../auth/useAuth'
 import { Alert } from '../Alert'
@@ -9,6 +9,8 @@ export function ConsentGate({ children }: { children: ReactNode }) {
   const { user, me } = useAuth()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Stable callback ref: focus the heading once when the dialog appears, not on every re-render.
+  const focusOnMount = useCallback((el: HTMLElement | null) => el?.focus(), [])
 
   if (user?.consentAcceptedAt) return <>{children}</>
 
@@ -26,10 +28,10 @@ export function ConsentGate({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="consent" role="dialog" aria-labelledby="consent-title">
+    <div className="consent" role="dialog" aria-modal="true" aria-labelledby="consent-title">
       <div className="panel consent__card">
         <p className="eyebrow">Before we talk</p>
-        <h1 id="consent-title" className="panel__title consent__title">
+        <h1 id="consent-title" tabIndex={-1} ref={focusOnMount} className="panel__title consent__title">
           How Book Buddy uses your messages
         </h1>
         <ul className="consent__list">

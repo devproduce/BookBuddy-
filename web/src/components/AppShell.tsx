@@ -1,4 +1,6 @@
+import { useEffect, useRef } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
+import { strings } from '../i18n'
 import { BrandMark } from './BrandMark'
 
 function Icon({ name }: { name: 'home' | 'library' | 'chat' | 'memory' | 'settings' }) {
@@ -50,26 +52,43 @@ function Icon({ name }: { name: 'home' | 'library' | 'chat' | 'memory' | 'settin
 }
 
 const NAV = [
-  { to: '/', label: 'Home', icon: 'home', end: true },
-  { to: '/library', label: 'Library', icon: 'library' },
-  { to: '/chat', label: 'Chat', icon: 'chat' },
-  { to: '/memory', label: 'Memory', icon: 'memory' },
-  { to: '/settings', label: 'Settings', icon: 'settings' },
+  { to: '/', label: strings.nav.home, icon: 'home', end: true },
+  { to: '/library', label: strings.nav.library, icon: 'library' },
+  { to: '/chat', label: strings.nav.chat, icon: 'chat' },
+  { to: '/memory', label: strings.nav.memory, icon: 'memory' },
+  { to: '/settings', label: strings.nav.settings, icon: 'settings' },
 ] as const
 
 export function AppShell() {
   const location = useLocation()
+  const mainRef = useRef<HTMLElement>(null)
+
+  // Client-side navigation does not move focus on its own, so keyboard and screen-reader
+  // users would be left on the link they just activated. Move focus to <main> when the
+  // top-level section changes (not for in-section moves like switching conversations, and
+  // not on the first render, where the browser's own starting point is right).
+  const section = location.pathname.split('/')[1] ?? ''
+  const previousSection = useRef(section)
+  useEffect(() => {
+    if (previousSection.current !== section) {
+      previousSection.current = section
+      mainRef.current?.focus({ preventScroll: true })
+    }
+  }, [section])
 
   return (
     <div className="shell">
+      <a className="skip-link" href="#main-content">
+        {strings.a11y.skipToContent}
+      </a>
       <aside className="shell__rail">
-        <NavLink to="/" className="shell__logo" aria-label="Book Buddy home">
+        <NavLink to="/" className="shell__logo" aria-label={strings.a11y.homeLink}>
           <BrandMark size={30} />
           <span>
             Book <em>Buddy</em>
           </span>
         </NavLink>
-        <nav className="nav" aria-label="Primary">
+        <nav className="nav" aria-label={strings.a11y.primaryNav}>
           {NAV.map((item) => {
             return (
               <NavLink
@@ -84,9 +103,9 @@ export function AppShell() {
             )
           })}
         </nav>
-        <p className="shell__footnote">Your reading companion.</p>
+        <p className="shell__footnote">{strings.app.footnote}</p>
       </aside>
-      <main className="shell__main">
+      <main className="shell__main" id="main-content" tabIndex={-1} ref={mainRef}>
         {/* key re-mounts the wrapper so the enter animation replays per route */}
         <div className="page" key={location.pathname.startsWith('/chat') ? '/chat' : location.pathname}>
           <Outlet />

@@ -26,6 +26,7 @@ import com.bookbuddy.embedding.HashEmbeddingProvider;
 import com.bookbuddy.rag.RagDtos.AskRequest;
 import com.bookbuddy.rag.RagDtos.AskResponse;
 import com.bookbuddy.vector.BookChunkDocument;
+import com.bookbuddy.vector.BookChunkRepository;
 import com.bookbuddy.vector.HybridSearchService;
 import com.bookbuddy.vector.HybridSearchService.HybridHit;
 import java.util.List;
@@ -45,7 +46,8 @@ class RagServiceTest {
     void setUp() {
         BookBuddyProperties props = new BookBuddyProperties(null, null, null, null, null, null, null, null, null);
         service = new RagService(
-                books, new HashEmbeddingProvider(), search, llm, new QuoteVerifier(cleaning), cleaning, props);
+                books, new HashEmbeddingProvider(), search, llm, new QuoteVerifier(cleaning), cleaning, props,
+                new RagProperties(false, 0, null), mock(BookChunkRepository.class));
 
         BookDocument book = new BookDocument();
         book.setId("b1");
@@ -91,6 +93,34 @@ class RagServiceTest {
         assertTrue(r.answer().contains("\u201CThe keeper lived alone for forty years.\u201D"), r.answer());
         assertTrue(r.answer().contains("[1]") && r.answer().contains("[2]"), r.answer());
         verify(llm, never()).complete(anyString(), anyString());
+    }
+
+    @Test
+    void truncatedChunkIsCompletedFromItsNeighbourOnlyWhenTheFlagIsOn() {
+        BookChunkDocument cut = chunk("c1", "The keeper lived alone for forty years and every night he climbed the", 12);
+        cut.setUserId("u1");
+        cut.setChunkIndex(4);
+        BookChunkDocument next = chunk("c2", "and every night he climbed the stairs to the lamp. Then he slept.", 13);
+        next.setChunkIndex(5);
+        BookChunkRepository repo = mock(BookChunkRepository.class);
+        when(repo.findNeighbor("b1", "u1", 5)).thenReturn(java.util.Optional.of(next));
+        hits(cut);
+
+        BookBuddyProperties props = new BookBuddyProperties(null, null, null, null, null, null, null, null, null);
+        RagService on = new RagService(books, new HashEmbeddingProvider(), search, llm, new QuoteVerifier(cleaning),
+                cleaning, props, new RagProperties(true, 0, null), repo);
+        RagService off = new RagService(books, new HashEmbeddingProvider(), search, llm, new QuoteVerifier(cleaning),
+                cleaning, props, new RagProperties(false, 0, null), repo);
+
+        RagService.Retrieval expanded = on.retrieve("u1", "How long did the keeper live alone?", null);
+        assertEquals(
+                "The keeper lived alone for forty years and every night he climbed the stairs to the lamp.",
+                expanded.chunks().get(0).getContent());
+        assertEquals(13, expanded.citations().get(0).pageEnd());
+        assertEquals("c1", expanded.citations().get(0).chunkId());
+
+        RagService.Retrieval plain = off.retrieve("u1", "How long did the keeper live alone?", null);
+        assertEquals(cut.getContent(), plain.chunks().get(0).getContent());
     }
 
     @Test

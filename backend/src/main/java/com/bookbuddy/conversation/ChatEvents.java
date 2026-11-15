@@ -25,7 +25,13 @@ public final class ChatEvents {
      */
     public record Done(String messageId, Status status, String content, TokenUsage usage, String modelId) {}
 
-    public record Error(String code, String message, boolean retryable, String messageId) {}
+    /** {@code retryAfterSeconds} is only set when the provider told us how long to wait (e.g. on RATE_LIMITED). */
+    public record Error(String code, String message, boolean retryable, String messageId, Integer retryAfterSeconds) {
+
+        public Error(String code, String message, boolean retryable, String messageId) {
+            this(code, message, retryable, messageId, null);
+        }
+    }
 
     public interface Sink {
 

@@ -1,5 +1,7 @@
 server:
   port: ${PORT:8080}
+  # set to "framework" behind nginx/Caddy so X-Forwarded-* headers are honoured
+  forward-headers-strategy: ${FORWARD_HEADERS_STRATEGY:none}
   error:
     include-message: never
 
@@ -68,7 +70,15 @@ bookbuddy:
   quota:
     daily-request-soft-limit: ${LLM_DAILY_SOFT_LIMIT:900}
   prompt:
-    chat-system-id: chat.system.v1
+    # versioned files in src/main/resources/prompt/<id>.txt; set CHAT_PROMPT_ID=chat.system.v1 to roll back
+    chat-system-id: ${CHAT_PROMPT_ID:chat.system.v2}
+    query-rewrite-id: ${QUERY_REWRITE_PROMPT_ID:query-rewrite.v1}
+  rag:
+    # complete passages that start/end mid-sentence from the neighbouring chunk
+    expand-truncated-neighbors: ${RAG_EXPAND_NEIGHBORS:true}
+    neighbor-max-chars: 400
+    # heuristic (free) | llm (one small call per follow-up, heuristic on failure) | off
+    rewrite-mode: ${RAG_REWRITE_MODE:heuristic}
   memory:
     # queue extraction after this many new messages, or when a conversation has been idle this many minutes
     extract-every-messages: 6
@@ -90,6 +100,9 @@ bookbuddy:
     initial-delay-ms: 15000
 
 logging:
+  pattern:
+    # correlation id comes from CorrelationIdFilter (X-Correlation-Id header, echoed on every response)
+    level: "%5p [cid=%X{correlationId:-}]"
   level:
     root: INFO
     com.bookbuddy: INFO

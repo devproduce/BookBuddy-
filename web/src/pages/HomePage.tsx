@@ -3,19 +3,22 @@ import { Link } from 'react-router-dom'
 import { chatApi, type Conversation } from '../api/chat'
 import { BrandHero } from '../components/BrandMark'
 import { useAuth } from '../auth/useAuth'
+import { strings } from '../i18n'
 
 function greeting(): string {
   const h = new Date().getHours()
-  if (h < 5) return 'Still up'
-  if (h < 12) return 'Good morning'
-  if (h < 18) return 'Good afternoon'
-  return 'Good evening'
+  const g = strings.home.greeting
+  if (h < 5) return g.lateNight
+  if (h < 12) return g.morning
+  if (h < 18) return g.afternoon
+  return g.evening
 }
 
 export function HomePage() {
   const { user } = useAuth()
   const name = user?.displayName?.split(' ')[0]
   const [recent, setRecent] = useState<Conversation[] | null>(null)
+  const t = strings.home
 
   useEffect(() => {
     const ctrl = new AbortController()
@@ -33,41 +36,39 @@ export function HomePage() {
           {greeting()}
           {name ? `, ${name}` : ''}
         </p>
-        <BrandHero tagline="Your reading companion — ask about a chapter, a character, or a line you can't stop thinking about." />
+        <BrandHero tagline={t.tagline} />
         <div className="hero__actions">
           <Link to="/chat" className="btn btn--primary btn--lg">
-            Talk to Book Buddy
+            {t.talk}
           </Link>
           <Link to="/library" className="btn btn--ghost btn--lg">
-            Browse library
+            {t.browse}
           </Link>
         </div>
       </section>
 
       <div className="home__grid">
-        <section className="panel">
+        <section className="panel" aria-labelledby="home-continue">
           <header className="panel__head">
-            <h2>Continue reading</h2>
-            <span className="tag">Soon</span>
+            <h2 id="home-continue">{t.continueReading}</h2>
+            <span className="tag">{t.soon}</span>
           </header>
           <div className="placeholder placeholder--book">
             <div className="placeholder__cover" aria-hidden="true" />
-            <div className="placeholder__lines">
+            <div className="placeholder__lines" aria-hidden="true">
               <span style={{ width: '70%' }} />
               <span style={{ width: '45%' }} />
               <span style={{ width: '60%' }} />
             </div>
           </div>
-          <p className="panel__note">
-            Pick up your current book right where you paused. Reading progress is on its way.
-          </p>
+          <p className="panel__note">{t.continueNote}</p>
         </section>
 
-        <section className="panel">
+        <section className="panel" aria-labelledby="home-recent">
           <header className="panel__head">
-            <h2>Recent conversations</h2>
+            <h2 id="home-recent">{t.recentTitle}</h2>
             <Link to="/chat" className="link-btn">
-              New chat
+              {t.newChat}
             </Link>
           </header>
           {recent && recent.length > 0 ? (
@@ -76,16 +77,14 @@ export function HomePage() {
                 <li key={c.id}>
                   <Link to={`/chat/${c.id}`} className="recent-list__item">
                     <span className="recent-list__title">{c.title}</span>
-                    {c.incognito && <span className="conv__badge">Incognito</span>}
+                    {c.incognito && <span className="conv__badge">{t.incognito}</span>}
                   </Link>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="panel__note">
-              {recent === null
-                ? 'Loading…'
-                : 'Your chats with Book Buddy will gather here, so you can return to any thread.'}
+            <p className="panel__note" role={recent === null ? 'status' : undefined}>
+              {recent === null ? strings.a11y.loading : t.recentEmpty}
             </p>
           )}
         </section>

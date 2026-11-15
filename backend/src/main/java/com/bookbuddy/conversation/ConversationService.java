@@ -98,6 +98,7 @@ public class ConversationService {
     private final QuoteVerifier quoteVerifier;
     private final IntentRouter intentRouter;
     private final PromptLoader prompts;
+    private final RewriteService rewriter;
     private final RollingSummaryService summaries;
     private final MemoryRetrievalService memoryRetrieval;
     private final MemoryExtractionService memoryExtraction;
@@ -119,6 +120,7 @@ public class ConversationService {
             QuoteVerifier quoteVerifier,
             IntentRouter intentRouter,
             PromptLoader prompts,
+            RewriteService rewriter,
             RollingSummaryService summaries,
             MemoryRetrievalService memoryRetrieval,
             MemoryExtractionService memoryExtraction,
@@ -135,6 +137,7 @@ public class ConversationService {
         this.quoteVerifier = quoteVerifier;
         this.intentRouter = intentRouter;
         this.prompts = prompts;
+        this.rewriter = rewriter;
         this.summaries = summaries;
         this.memoryRetrieval = memoryRetrieval;
         this.memoryExtraction = memoryExtraction;
@@ -382,7 +385,8 @@ public class ConversationService {
             String code = e instanceof ApiException api ? api.getCode() : "GENERATION_FAILED";
             String message = e instanceof ApiException api ? api.getMessage()
                     : "I couldn't finish that reply. Please try again.";
-            sink.error(new ChatEvents.Error(code, message, true, assistant.getId()));
+            Integer retryAfter = e instanceof ApiException api ? api.getRetryAfterSeconds() : null;
+            sink.error(new ChatEvents.Error(code, message, true, assistant.getId(), retryAfter));
             return assistant;
         }
     }
@@ -424,7 +428,10 @@ public class ConversationService {
 
         Intent intent = intentRouter.route(question, scope.mode() == ScopeMode.ONE);
         boolean retrieve = scope.mode() != ScopeMode.NONE && intent.needsBooks();
-        Retrieval retrieval = retrieve ? rag.retrieve(userId, question, conversation.scopedBookIds()) : null;
+        // follow-ups ("why did he do that?") are rewritten into a standalone search query; the model still sees the
+        // user's own words
+        String searchQuery = retrieve ? searchQueryFor(turn, userId, question) : question;
+        Retrieval retrieval = retrieve ? rag.retrieve(userId, searchQuery, conversation.scopedBookIds()) : null;
         boolean hasPassages = retrieval != null && !retrieval.isEmpty();
 
         MemoryContext memory = llm.isConfigured() ? recall(userId, question) : MemoryContext.EMPTY;
@@ -462,9 +469,17 @@ public class ConversationService {
                     failedMidStream = true;
                 } else if (hasPassages) {
                     assistant.setMemoryIdsUsed(new ArrayList<>()); // the model never saw them
-                    streamWords(rag.extractiveAnswer(question, retrieval.chunks(), retrieval.citations()),
+                    streamWords(rag.extractiveAnswer(searchQuery, retrieval.chunks(), retrieval.citations()),
                             out, sink, cancel);
                     modelId = OFFLINE_MODEL;
+                } else if (e.isRateLimited()) {
+                    // be honest: the provider is limiting us, retrying later will work
+                    throw new ApiException(
+                            org.springframework.http.HttpStatus.TOO_MANY_REQUESTS,
+                            "RATE_LIMITED",
+                            "Book Buddy's AI provider is limiting requests right now. Please try again shortly.",
+                            true,
+                            e.retryAfterSeconds());
                 } else {
                     throw new ApiException(
                             org.springframework.http.HttpStatus.BAD_GATEWAY,
@@ -475,7 +490,7 @@ public class ConversationService {
                 }
             }
         } else if (hasPassages) {
-            streamWords(rag.extractiveAnswer(question, retrieval.chunks(), retrieval.citations()), out, sink, cancel);
+            streamWords(rag.extractiveAnswer(searchQuery, retrieval.chunks(), retrieval.citations()), out, sink, cancel);
             modelId = OFFLINE_MODEL;
         } else {
             streamWords(OFFLINE_REPLY, out, sink, cancel);
@@ -543,6 +558,20 @@ public class ConversationService {
         if (memoryExtraction != null) {
             // queues a durable background job at most; extraction itself never runs on the reply path
             memoryExtraction.onTurnCompleted(turn.user(), turn.conversation());
+        }
+    }
+
+    /** The query to retrieve with: the message itself, or its standalone rewrite when it is a follow-up. */
+    private String searchQueryFor(Turn turn, String userId, String question) {
+        if (rewriter == null || !rewriter.looksLikeFollowUp(question)) {
+            return question;
+        }
+        try {
+            RewriteService.Result result = rewriter.rewrite(userId, question, history(turn));
+            return result == null || result.query() == null || result.query().isBlank() ? question : result.query();
+        } catch (RuntimeException e) {
+            log.debug("Query rewrite skipped: {}", e.getClass().getSimpleName());
+            return question; // rewriting is an enhancement; never break the turn
         }
     }
 

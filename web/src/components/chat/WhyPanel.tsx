@@ -6,6 +6,7 @@ import { categoryLabel, memoryApi, type Memory } from '../../api/memory'
 import { Alert } from '../Alert'
 import { errorMessage } from '../errorMessage'
 import type { UiMessage } from './types'
+import { usePanelFocus } from './usePanelFocus'
 
 /**
  * "Why this answer": what Book Buddy drew on for one reply. Lists the memories that were in the prompt (with a quick
@@ -61,13 +62,21 @@ export function WhyPanel({
 
   const removed = memories ? Math.max(0, ids.length - memories.length) : 0
   const citations = message.citations
+  const [panelRef, onPanelKeyDown] = usePanelFocus<HTMLElement>(onClose)
 
   return (
-    <aside className="passage why" role="dialog" aria-label="Why this answer">
+    <aside
+      className="passage why"
+      role="dialog"
+      aria-labelledby="why-title"
+      tabIndex={-1}
+      ref={panelRef}
+      onKeyDown={onPanelKeyDown}
+    >
       <header className="passage__head">
         <div>
           <p className="passage__eyebrow">Why this answer</p>
-          <h3 className="passage__title">What shaped this reply</h3>
+          <h3 id="why-title" className="passage__title">What shaped this reply</h3>
         </div>
         <button type="button" className="btn btn--sm btn--ghost" onClick={onClose} aria-label="Close panel">
           Close

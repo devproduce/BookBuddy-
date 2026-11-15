@@ -8,7 +8,8 @@ import {
   type SafetyEvent,
   type StreamHandlers,
 } from '../api/chat'
-import { ApiError } from '../api/client'
+import { ApiError, isQuotaProblem } from '../api/client'
+import { quotaApi, type QuotaStatus } from '../api/quota'
 import { settingsApi, type CrisisResource } from '../api/settings'
 import { useAuth } from '../auth/useAuth'
 import { Alert } from '../components/Alert'
@@ -18,7 +19,8 @@ import { NewChatPanel, type NewChatOptions } from '../components/chat/NewChatPan
 import { PassagePanel } from '../components/chat/PassagePanel'
 import { WhyPanel } from '../components/chat/WhyPanel'
 import { isLocalId, toUi, uid, type UiMessage } from '../components/chat/types'
-import { errorMessage } from '../components/errorMessage'
+import { describeProblem, errorMessage, formatWait } from '../components/errorMessage'
+import { strings } from '../i18n'
 
 const isAbort = (err: unknown) => err instanceof DOMException && err.name === 'AbortError'
 
@@ -95,6 +97,7 @@ function Chat() {
   const [draft, setDraft] = useState('')
   const [passage, setPassage] = useState<MessageCitation | null>(null)
   const [whyKey, setWhyKey] = useState<string | null>(null)
+  const [quota, setQuota] = useState<QuotaStatus | null>(null)
 
   const abortRef = useRef<AbortController | null>(null)
   /** Conversation whose messages are currently held in state. */
@@ -116,6 +119,19 @@ function Chat() {
       setListLoading(false)
     }
   }, [])
+
+  /** Soft quota status for the heads-up banner; the banner is a nicety, so failures stay silent. */
+  const refreshQuota = useCallback(async () => {
+    try {
+      setQuota(await quotaApi.status())
+    } catch {
+      /* no banner */
+    }
+  }, [])
+
+  useEffect(() => {
+    void refreshQuota()
+  }, [refreshQuota])
 
   useEffect(() => {
     void refreshList()
@@ -259,8 +275,13 @@ function Chat() {
                 id: e.messageId ?? m.id,
                 status: m.content ? 'INTERRUPTED' : 'FAILED',
                 streaming: false,
-                errorText: e.message,
+                errorText: describeProblem({
+                  code: e.code,
+                  message: e.message,
+                  retryAfterSeconds: e.retryAfterSeconds,
+                }),
               }))
+              if (isQuotaProblem(null, e.code)) void refreshQuota()
             },
           },
           ctrl.signal,
@@ -278,6 +299,7 @@ function Chat() {
             streaming: false,
             errorText: errorMessage(err),
           }))
+          if (err instanceof ApiError && isQuotaProblem(err.status, err.code)) void refreshQuota()
         }
       } finally {
         if (abortRef.current === ctrl) abortRef.current = null
@@ -291,7 +313,7 @@ function Chat() {
           .catch(() => undefined)
       }
     },
-    [me, refreshList],
+    [me, refreshList, refreshQuota],
   )
 
   function sendTo(convId: string, text: string) {
@@ -452,7 +474,12 @@ function Chat() {
       </aside>
 
       {/* ---- thread / new chat ---- */}
-      <section className="chat__main">
+      <section className="chat__main" aria-label="Conversation">
+        {quota && quota.state !== 'OK' && (
+          <p className="notice notice--warn chat__quota" role="status">
+            {strings.quota.chatNotice[quota.state]} {strings.quota.resetsIn(formatWait(quota.resetsInSeconds))}
+          </p>
+        )}
         {!inThread ? (
           <div className="chat__scroll chat__scroll--new">
             <Alert>{error}</Alert>

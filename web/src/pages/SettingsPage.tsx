@@ -2,10 +2,12 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import type { CrisisContact } from '../api/auth'
 import { accountApi } from '../api/memory'
+import { quotaApi, type QuotaStatus } from '../api/quota'
 import { settingsApi, type Settings } from '../api/settings'
 import { useAuth } from '../auth/useAuth'
 import { Alert } from '../components/Alert'
-import { errorMessage } from '../components/errorMessage'
+import { errorMessage, formatWait } from '../components/errorMessage'
+import { strings } from '../i18n'
 
 const LANGUAGES = [
   { code: 'en', label: 'English' },
@@ -29,6 +31,8 @@ export function SettingsPage() {
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [deleteText, setDeleteText] = useState('')
   const [deleting, setDeleting] = useState(false)
+  /** undefined = loading, null = could not be read */
+  const [quota, setQuota] = useState<QuotaStatus | null | undefined>(undefined)
 
   useEffect(() => {
     const ctrl = new AbortController()
@@ -40,6 +44,14 @@ export function SettingsPage() {
       })
       .catch((err) => {
         if (!ctrl.signal.aborted) setError(errorMessage(err))
+      })
+    quotaApi
+      .status(ctrl.signal)
+      .then((q) => {
+        if (!ctrl.signal.aborted) setQuota(q)
+      })
+      .catch(() => {
+        if (!ctrl.signal.aborted) setQuota(null)
       })
     return () => ctrl.abort()
   }, [])
@@ -144,6 +156,45 @@ export function SettingsPage() {
             <dd>{user?.email}</dd>
           </div>
         </dl>
+      </section>
+
+      <section className="panel" aria-labelledby="quota-heading">
+        <header className="panel__head">
+          <h2 id="quota-heading">{strings.quota.title}</h2>
+          {quota && (
+            <span className={`tag${quota.state === 'OK' ? '' : ' tag--warn'}`}>{strings.quota.states[quota.state]}</span>
+          )}
+        </header>
+        <p className="panel__note">{strings.quota.lede}</p>
+        {quota === undefined ? (
+          <p className="hint">{strings.a11y.loading}</p>
+        ) : quota === null ? (
+          <p className="hint">{strings.quota.unavailable}</p>
+        ) : (
+          <>
+            <div
+              className="progress"
+              role="progressbar"
+              aria-label={strings.quota.title}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={quota.percentUsed}
+              aria-valuetext={strings.quota.percentUsed(quota.percentUsed)}
+            >
+              <div className="progress__bar" style={{ width: `${quota.percentUsed}%` }} />
+            </div>
+            <p className="panel__note">
+              {strings.quota.percentUsed(quota.percentUsed)}. {strings.quota.resetsIn(formatWait(quota.resetsInSeconds))}{' '}
+              {quota.state === 'EXHAUSTED'
+                ? strings.quota.explainExhausted
+                : quota.state === 'LOW'
+                  ? strings.quota.explainLow
+                  : quota.backgroundPaused
+                    ? strings.quota.explainBackground
+                    : strings.quota.explainOk}
+            </p>
+          </>
+        )}
       </section>
 
       <section className="panel">

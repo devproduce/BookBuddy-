@@ -27,6 +27,11 @@ export class ApiError extends Error {
   }
 }
 
+/** True for "slow down / allowance used up" answers: HTTP 429 or the RATE_LIMITED / QUOTA_EXHAUSTED codes. */
+export function isQuotaProblem(status: number | null | undefined, code: string | null | undefined): boolean {
+  return status === 429 || code === 'RATE_LIMITED' || code === 'QUOTA_EXHAUSTED'
+}
+
 export const tokenStore = {
   get: (): string | null => localStorage.getItem(TOKEN_KEY),
   set: (token: string) => localStorage.setItem(TOKEN_KEY, token),
@@ -54,9 +59,9 @@ function toApiError(res: Response, data: unknown, skipAuthRedirect = false): Api
   const parsed = data as Partial<ApiErrorBody> | undefined
   const retryAfterHeader = Number(res.headers.get('Retry-After'))
   const error = new ApiError(res.status, {
-    code: parsed?.code ?? `HTTP_${res.status}`,
+    code: parsed?.code ?? (res.status === 429 ? 'RATE_LIMITED' : `HTTP_${res.status}`),
     message: parsed?.message ?? res.statusText ?? 'Something went wrong.',
-    retryable: parsed?.retryable ?? res.status >= 500,
+    retryable: parsed?.retryable ?? (res.status >= 500 || res.status === 429),
     retryAfterSeconds:
       parsed?.retryAfterSeconds ?? (Number.isFinite(retryAfterHeader) && retryAfterHeader > 0 ? retryAfterHeader : null),
   })

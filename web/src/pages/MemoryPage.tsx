@@ -9,6 +9,7 @@ import {
 import { settingsApi } from '../api/settings'
 import { Alert } from '../components/Alert'
 import { errorMessage } from '../components/errorMessage'
+import { strings } from '../i18n'
 
 const MAX_LEN = 500
 
@@ -288,18 +289,16 @@ export function MemoryPage() {
     }
   }
 
+  const t = strings.memory
   const q = ONBOARDING[step]
   const lastStep = step === ONBOARDING.length - 1
 
   return (
     <div className="memory">
       <header className="page-head page-head--stack">
-        <p className="eyebrow">What Book Buddy knows</p>
-        <h1 className="page-title">Memory</h1>
-        <p className="lede">
-          Everything here is yours to read, correct or erase. Book Buddy uses these notes to make its answers and
-          recommendations feel personal.
-        </p>
+        <p className="eyebrow">{t.eyebrow}</p>
+        <h1 className="page-title">{t.title}</h1>
+        <p className="lede">{t.lede}</p>
       </header>
 
       <Alert>{error}</Alert>
@@ -312,14 +311,10 @@ export function MemoryPage() {
       <section className="panel">
         <div className="toggle-row toggle-row--live">
           <div>
-            <strong>{enabled === false ? 'Memory is paused' : 'Let Book Buddy remember me'}</strong>
-            <p className="panel__note">
-              {enabled === false
-                ? 'Nothing is being remembered or used in chats. Your saved notes below are kept until you remove them.'
-                : 'Pause this any time. Notes you have saved stay put but are not used while paused.'}
-            </p>
+            <strong>{enabled === false ? t.pausedTitle : t.onTitle}</strong>
+            <p className="panel__note">{enabled === false ? t.pausedNote : t.onNote}</p>
           </div>
-          <label className="switch switch--live" aria-label="Remember me">
+          <label className="switch switch--live" aria-label={t.rememberToggle}>
             <input
               type="checkbox"
               checked={enabled ?? false}
@@ -333,7 +328,7 @@ export function MemoryPage() {
 
       <section className="panel memory__profile">
         <header className="panel__head">
-          <h2>How Book Buddy sees you</h2>
+          <h2>{t.profileTitle}</h2>
           {profile && (
             <span className="tag" title="Rough size of this summary in the prompt">
               ~{profile.estimatedTokens} / {profile.tokenBudget} tokens
@@ -341,11 +336,11 @@ export function MemoryPage() {
           )}
         </header>
         {profile === null ? (
-          <p className="hint">Loading…</p>
+          <p className="hint">{strings.a11y.loading}</p>
         ) : profile.text.trim() ? (
           <blockquote className="memory__snippet">{profile.text}</blockquote>
         ) : (
-          <p className="hint">Nothing yet. As you chat, or add notes below, a short summary will appear here.</p>
+          <p className="hint">{t.profileEmpty}</p>
         )}
         <div className="panel__actions">
           <button type="button" className="btn btn--sm btn--ghost" onClick={openOnboarding}>

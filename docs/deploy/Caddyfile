@@ -1,0 +1,73 @@
+# /etc/caddy/Caddyfile  -- recommended reverse proxy (automatic Let's Encrypt HTTPS).
+#
+# Replace api.example.com with your real DNS name (A/AAAA record -> the EC2 Elastic IP) BEFORE starting Caddy,
+# and open ports 80 and 443 in the security group (80 is needed for the ACME HTTP challenge and redirects).
+# Validate with:  caddy validate --config /etc/caddy/Caddyfile
+# Prefer nginx? See docs/deploy/nginx.conf.example.
+
+# Shared by the SSE routes: no buffering, no compression (encode is applied only in the generic handle below),
+# long timeouts.
+(sse_proxy) {
+	reverse_proxy 127.0.0.1:8080 {
+		flush_interval -1              # flush every write immediately: tokens reach the browser as produced
+		transport http {
+			read_timeout 6m            # backend SSE timeout is 5 min; it sends a keepalive comment every 15 s
+			write_timeout 6m
+		}
+		header_up X-Real-IP {remote_host}
+	}
+}
+
+api.example.com {
+	# Uploads are capped by the backend (MAX_UPLOAD_MB, default 50). Keep the proxy limit a little higher.
+	request_body {
+		max_size 60MB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	# Chat stream:       POST /api/v1/conversations/{id}/messages/stream
+	# Regenerate stream: POST /api/v1/conversations/{id}/messages/{mid}/regenerate  (Accept: text/event-stream)
+	@sse_stream path /api/v1/conversations/*/messages/stream
+	@sse_regen path_regexp ^/api/v1/conversations/[^/]+/messages/[^/]+/regenerate$
+
+	handle @sse_stream {
+		import sse_proxy
+	}
+
+	handle @sse_regen {
+		import sse_proxy
+	}
+
+	# Everything else (REST API, health, PDF uploads)
+	handle {
+		encode zstd gzip
+		reverse_proxy 127.0.0.1:8080 {
+			header_up X-Real-IP {remote_host}
+			transport http {
+				read_timeout 5m        # PDF upload + ingestion kick-off can be slow on small instances
+			}
+		}
+	}
+
+	log {
+		output file /var/log/caddy/bookbuddy-access.log {
+			roll_size 20mb
+			roll_keep 5
+		}
+		format json
+	}
+}
+
+# Optional: serve the built web app (web/dist) from the same box instead of S3/CloudFront/Netlify.
+# app.example.com {
+# 	root * /var/www/bookbuddy
+# 	encode zstd gzip
+# 	try_files {path} /index.html
+# 	file_server
+# }

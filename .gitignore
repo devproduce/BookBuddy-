@@ -2,6 +2,11 @@
 .env
 .env.*
 !.env.example
+!.env.compose.example
+# Local DB backups (never commit)
+backups/
+*.archive.gz
+*.archive.gz.*
 **/application-local.yml
 **/secrets/
 *.pem

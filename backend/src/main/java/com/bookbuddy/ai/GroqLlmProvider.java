@@ -80,7 +80,7 @@ public class GroqLlmProvider implements LlmProvider {
             }
             return content.strip();
         } catch (WebClientResponseException e) {
-            throw new LlmException("Groq request failed with HTTP " + e.getStatusCode().value(), e);
+            throw LlmException.http(e.getStatusCode().value(), retryAfter(e), e);
         } catch (LlmException e) {
             throw e;
         } catch (RuntimeException e) {
@@ -165,7 +165,7 @@ public class GroqLlmProvider implements LlmProvider {
         }
         Throwable error = failure.get();
         if (error instanceof WebClientResponseException e) {
-            throw new LlmException("Groq request failed with HTTP " + e.getStatusCode().value(), e);
+            throw LlmException.http(e.getStatusCode().value(), retryAfter(e), e);
         }
         if (error != null) {
             throw new LlmException("Groq stream failed: " + error.getClass().getSimpleName(), error);
@@ -174,6 +174,20 @@ public class GroqLlmProvider implements LlmProvider {
             throw new LlmException("Groq returned an empty completion");
         }
         return new StreamResult(text.toString(), usage.get(), model, false);
+    }
+
+    /** Seconds from a numeric Retry-After header, or null (HTTP-date values are ignored). */
+    private static Integer retryAfter(WebClientResponseException e) {
+        String raw = e.getHeaders().getFirst(HttpHeaders.RETRY_AFTER);
+        if (raw == null) {
+            return null;
+        }
+        try {
+            double seconds = Double.parseDouble(raw.strip());
+            return seconds > 0 && seconds < 86_400 ? (int) Math.ceil(seconds) : null;
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
     }
 
     private String resolveModel(String requested) {

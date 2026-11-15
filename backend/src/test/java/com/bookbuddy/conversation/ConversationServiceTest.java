@@ -52,12 +52,14 @@ import com.bookbuddy.memory.MemoryExtractionService;
 import com.bookbuddy.memory.MemoryRetrievalService;
 import com.bookbuddy.quota.LlmBudgetService;
 import com.bookbuddy.rag.QuoteVerifier;
+import com.bookbuddy.rag.RagProperties;
 import com.bookbuddy.rag.RagService;
 import com.bookbuddy.safety.CrisisResponseService;
 import com.bookbuddy.safety.RiskClassifier;
 import com.bookbuddy.safety.RiskLevel;
 import com.bookbuddy.safety.SafetyEventLogger;
 import com.bookbuddy.vector.BookChunkDocument;
+import com.bookbuddy.vector.BookChunkRepository;
 import com.bookbuddy.vector.HybridSearchService;
 import com.bookbuddy.vector.HybridSearchService.HybridHit;
 import java.time.Instant;
@@ -106,12 +108,17 @@ class ConversationServiceTest {
                 null, null);
         TextCleaningService cleaning = new TextCleaningService();
         QuoteVerifier verifier = new QuoteVerifier(cleaning);
-        RagService rag = new RagService(books, new HashEmbeddingProvider(), search, llm, verifier, cleaning, props);
+        RagProperties ragProps = RagProperties.defaults();
+        RagService rag = new RagService(
+                books, new HashEmbeddingProvider(), search, llm, verifier, cleaning, props, ragProps,
+                mock(BookChunkRepository.class));
+        PromptLoader promptLoader = new PromptLoader(props);
 
         service = new ConversationService(
                 conversations, messages, users, books, rag, llm,
                 new RiskClassifier(llm), new CrisisResponseService(props), safetyLogger, verifier,
-                new IntentRouter(), new PromptLoader(props), summaries, memoryRetrieval, memoryExtraction, budget);
+                new IntentRouter(), promptLoader, new RewriteService(promptLoader, llm, ragProps), summaries,
+                memoryRetrieval, memoryExtraction, budget);
         service.setWordDelayMs(0);
         when(memoryRetrieval.retrieve(anyString(), anyString())).thenReturn(MemoryContext.EMPTY);
 
@@ -423,7 +430,7 @@ class ConversationServiceTest {
         assertEquals(3, cite.pageStart());
         assertEquals("The keeper lived alone for forty years.", cite.excerpt());
         assertEquals("test-model", reply.getModelId());
-        assertEquals("chat.system.v1", reply.getPromptVersion());
+        assertEquals("chat.system.v2", reply.getPromptVersion());
         assertEquals(150, reply.getTokenUsage().totalTokens());
         assertEquals(Status.COMPLETE, reply.getStatus());
 
@@ -568,6 +575,47 @@ class ConversationServiceTest {
         assertEquals(reply.getId(), rec.error.messageId());
         assertNull(rec.done);
         assertEquals(1, stored(Role.USER).size(), "the user message is never lost");
+    }
+
+    @Test
+    void providerRateLimitIsReportedHonestlyWithRetryAfter() {
+        when(llm.isConfigured()).thenReturn(true);
+        doAnswer(inv -> {
+            throw LlmException.http(429, 42, null);
+        }).when(llm).streamChat(any(), any(), any(), any());
+
+        Recorder rec = run("hello");
+
+        assertEquals(Status.FAILED, stored(Role.ASSISTANT).get(0).getStatus());
+        assertEquals("RATE_LIMITED", rec.error.code());
+        assertTrue(rec.error.retryable());
+        assertEquals(42, rec.error.retryAfterSeconds());
+    }
+
+    @Test
+    void followUpIsRewrittenIntoAStandaloneSearchQueryBeforeRetrieval() {
+        seed(Role.USER, "Who is the lighthouse keeper in the book?", Status.COMPLETE);
+        seed(Role.ASSISTANT, "He is an old man who lives alone.", Status.COMPLETE);
+        retrieves(chunk("ch1", "The keeper left the island after the storm.", 7));
+
+        run("Why did he leave?");
+
+        ArgumentCaptor<String> query = ArgumentCaptor.forClass(String.class);
+        verify(search).search(eq(USER), query.capture(), any(float[].class), anyCollection(), anyInt(), anyDouble());
+        assertTrue(query.getValue().contains("lighthouse keeper"), query.getValue());
+        assertTrue(query.getValue().contains("Why did he leave?"), query.getValue());
+    }
+
+    @Test
+    void standaloneQuestionIsSearchedAsIs() {
+        seed(Role.USER, "Who is the lighthouse keeper in the book?", Status.COMPLETE);
+        retrieves(chunk("ch1", "The keeper lived alone for forty years.", 3));
+
+        run("How long did the keeper live alone in the book?");
+
+        ArgumentCaptor<String> query = ArgumentCaptor.forClass(String.class);
+        verify(search).search(eq(USER), query.capture(), any(float[].class), anyCollection(), anyInt(), anyDouble());
+        assertEquals("How long did the keeper live alone in the book?", query.getValue());
     }
 
     @Test

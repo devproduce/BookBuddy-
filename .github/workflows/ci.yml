@@ -5,9 +5,18 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+# Cancel superseded runs of the same branch/PR.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     defaults:
       run:
         working-directory: backend
@@ -17,17 +26,25 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-          cache: gradle
+      # Caches ~/.gradle (dependencies, wrapper distribution, build cache) keyed on the build files.
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-home-cache-cleanup: true
       - name: Test
         run: ./gradlew test --no-daemon
-      - name: Secret scan (gitleaks)
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        continue-on-error: true
+      - name: Package (bootJar)
+        run: ./gradlew bootJar -x test --no-daemon
+      - name: Upload test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-reports
+          path: backend/build/reports/tests/test
+          retention-days: 7
 
   web:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: web
@@ -40,3 +57,37 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: npm ci
       - run: npm run build
+
+  # Verifies the backend image still builds (no push). Uses the GitHub Actions layer cache.
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: backend
+          push: false
+          tags: bookbuddy-api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Fails the build when a secret is found (no continue-on-error). Needs full history to scan commits.
+  secrets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Secret scan (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Organisation-owned repos also need a GITLEAKS_LICENSE secret (free for personal accounts).
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}

@@ -35,4 +35,7 @@ Open http://localhost:5173
 
 - Product requirements: `Book Buddy – Product Requirements Document.md`
 - Phase 0 spikes: `docs/spikes/`
-- Deploy: `docs/deploy/`
+- Evaluation sets, emotional-quality rubric and how to run them: `docs/eval/README.md`
+- Deploy (EC2, systemd, HTTPS proxy, backups): `docs/deploy/README.md`
+- Observability: `docs/observability.md` · NFR targets and how to measure them: `docs/nfr.md`
+- Local API + Mongo in containers (optional): `docker compose up --build` (see `docker-compose.yml`)

@@ -1,0 +1,65 @@
+# /etc/systemd/system/bookbuddy.service
+#
+#   sudo cp docs/deploy/bookbuddy.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now bookbuddy
+#   journalctl -u bookbuddy -f
+#
+# Layout assumed (see docs/deploy/README.md):
+#   /opt/bookbuddy/app.jar              the Spring Boot fat jar (bootJar)
+#   /opt/bookbuddy/models/              model.onnx + tokenizer.json (optional)
+#   /var/lib/bookbuddy/uploads/         transient PDF uploads
+#   /etc/bookbuddy/bookbuddy.env        secrets + config (root:bookbuddy, mode 640)
+
+[Unit]
+Description=Book Buddy API (Spring Boot)
+Documentation=file:///opt/bookbuddy/docs/deploy/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bookbuddy
+Group=bookbuddy
+WorkingDirectory=/opt/bookbuddy
+
+# Secrets and settings live outside the repo and outside the jar.
+EnvironmentFile=/etc/bookbuddy/bookbuddy.env
+Environment=UPLOAD_DIR=/var/lib/bookbuddy/uploads
+Environment=EMBEDDING_MODEL_PATH=/opt/bookbuddy/models/model.onnx
+Environment=EMBEDDING_TOKENIZER_PATH=/opt/bookbuddy/models/tokenizer.json
+Environment=FORWARD_HEADERS_STRATEGY=framework
+# Heap sized for a 2 GB instance; raise MaxRAMPercentage if you have more RAM and the ONNX model is loaded.
+Environment="JAVA_OPTS=-XX:MaxRAMPercentage=60 -XX:+ExitOnOutOfMemoryError -Dfile.encoding=UTF-8"
+
+# Bind the app to loopback only: the reverse proxy is the sole public entry point.
+Environment=SERVER_ADDRESS=127.0.0.1
+
+ExecStart=/usr/bin/java $JAVA_OPTS -jar /opt/bookbuddy/app.jar
+# Graceful stop: JVM exits with 143 on SIGTERM, which is a normal stop for Java.
+SuccessExitStatus=143
+TimeoutStopSec=30
+
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# Rough ceiling so a leak cannot take the whole box (and sshd) down. Tune to your instance size.
+MemoryMax=1700M
+
+# --- Hardening ---------------------------------------------------------------------------------------------------
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+# The JVM needs W+X memory for the JIT, so do NOT set MemoryDenyWriteExecute=true.
+ReadWritePaths=/var/lib/bookbuddy
+ReadOnlyPaths=/opt/bookbuddy /etc/bookbuddy
+
+[Install]
+WantedBy=multi-user.target

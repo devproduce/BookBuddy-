@@ -93,6 +93,8 @@ export interface StreamError {
   message: string
   retryable: boolean
   messageId: string | null
+  /** Seconds the provider asked us to wait (set with RATE_LIMITED when known). */
+  retryAfterSeconds?: number | null
 }
 
 export interface StreamHandlers {

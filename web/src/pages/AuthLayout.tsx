@@ -11,9 +11,9 @@ export function AuthLayout({ children }: { children: ReactNode }) {
           <cite>George R. R. Martin</cite>
         </blockquote>
       </div>
-      <div className="auth__panel">
+      <main className="auth__panel" id="main-content">
         <div className="auth__card">{children}</div>
-      </div>
+      </main>
     </div>
   )
 }

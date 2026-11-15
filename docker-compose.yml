@@ -1,0 +1,48 @@
+# LOCAL DEVELOPMENT ONLY.
+# Production uses MongoDB Atlas + a systemd service (see docs/deploy/README.md); do not run this mongo in production.
+#
+#   cp .env.compose.example .env     # (root .env is git-ignored) then set JWT_SECRET, optionally GROQ_API_KEY
+#   docker compose up --build
+#   curl http://localhost:8080/api/v1/health
+#
+# The stock mongo image has no Atlas $vectorSearch, so VECTOR_MODE=memory (in-process brute-force cosine).
+
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:27017:27017"   # loopback only
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      MONGODB_URI: mongodb://mongo:27017/bookbuddy
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET (>= 32 random chars) in a root .env file}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-20b}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+      VECTOR_MODE: memory
+      EMBEDDING_ENABLED: ${EMBEDDING_ENABLED:-false}
+    volumes:
+      - uploads:/app/uploads
+      - ./backend/models:/app/models:ro   # optional: model.onnx + tokenizer.json (git-ignored)
+    mem_limit: 2g
+
+volumes:
+  mongo-data:
+  uploads:

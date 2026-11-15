@@ -10,10 +10,12 @@ import com.bookbuddy.document.SectionType;
 import com.bookbuddy.document.TextCleaningService;
 import com.bookbuddy.document.TextTokens;
 import com.bookbuddy.embedding.EmbeddingProvider;
+import com.bookbuddy.quota.LlmBudgetService;
 import com.bookbuddy.rag.RagDtos.AskRequest;
 import com.bookbuddy.rag.RagDtos.AskResponse;
 import com.bookbuddy.rag.RagDtos.Citation;
 import com.bookbuddy.vector.BookChunkDocument;
+import com.bookbuddy.vector.BookChunkRepository;
 import com.bookbuddy.vector.HybridSearchService;
 import com.bookbuddy.vector.HybridSearchService.HybridHit;
 import java.util.ArrayList;
@@ -24,6 +26,7 @@ import java.util.Map;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /** Retrieval-augmented answering over the user's own books, with verbatim-quote enforcement. */
@@ -62,6 +65,9 @@ public class RagService {
     private final QuoteVerifier quoteVerifier;
     private final TextCleaningService cleaning;
     private final BookBuddyProperties properties;
+    private final RagProperties ragProperties;
+    private final BookChunkRepository chunkRepository;
+    private volatile LlmBudgetService budget;
 
     public RagService(
             BookRepository bookRepository,
@@ -70,7 +76,9 @@ public class RagService {
             LlmProvider llm,
             QuoteVerifier quoteVerifier,
             TextCleaningService cleaning,
-            BookBuddyProperties properties) {
+            BookBuddyProperties properties,
+            RagProperties ragProperties,
+            BookChunkRepository chunkRepository) {
         this.bookRepository = bookRepository;
         this.embeddings = embeddings;
         this.search = search;
@@ -78,6 +86,23 @@ public class RagService {
         this.quoteVerifier = quoteVerifier;
         this.cleaning = cleaning;
         this.properties = properties;
+        this.ragProperties = ragProperties == null ? RagProperties.defaults() : ragProperties;
+        this.chunkRepository = chunkRepository;
+    }
+
+    /** Optional: counts direct /rag/ask LLM calls in {@code llm_usage} and against the shared daily quota. */
+    @Autowired(required = false)
+    public void setBudget(LlmBudgetService budget) {
+        this.budget = budget;
+    }
+
+    private void recordUsage(String userId, boolean ok, long startedMillis) {
+        LlmBudgetService b = budget;
+        if (b != null) {
+            // The provider does not expose token counts for complete(); only count and latency are recorded.
+            b.record(userId, LlmBudgetService.Priority.CHAT, properties.groq().defaultModel(), null,
+                    System.currentTimeMillis() - startedMillis, ok);
+        }
     }
 
     /** Retrieved passages plus their citations ({@code citations.get(i)} describes {@code chunks.get(i)}). */
@@ -106,9 +131,12 @@ public class RagService {
 
         String answer = null;
         if (llm.isConfigured()) {
+            long started = System.currentTimeMillis();
             try {
                 answer = llm.complete(SYSTEM_PROMPT, buildUserPrompt(question, chunks, citations));
+                recordUsage(userId, true, started);
             } catch (LlmException e) {
+                recordUsage(userId, false, started);
                 log.warn("LLM call failed ({}); using extractive answer", e.getMessage());
             }
         }
@@ -140,7 +168,7 @@ public class RagService {
         BookBuddyProperties.Vector cfg = properties.vector();
         double floor = embeddings.isSemantic() ? cfg.minSimilarity() : HASH_VECTOR_FLOOR;
         List<HybridHit> hits = search.search(userId, question, embeddings.embedQuery(question), ids, cfg.topN(), floor);
-        List<BookChunkDocument> chunks = select(hits, cfg.topK());
+        List<BookChunkDocument> chunks = expandTruncated(select(hits, cfg.topK()), userId);
 
         List<Citation> citations = new ArrayList<>(chunks.size());
         for (BookChunkDocument c : chunks) {
@@ -150,6 +178,29 @@ public class RagService {
         }
         return new Retrieval(chunks, citations);
     }
+
+    /**
+     * With {@code bookbuddy.rag.expand-truncated-neighbors}, completes chunks that begin or end mid-sentence from
+     * their neighbours. Best effort: any lookup problem just leaves the chunk as retrieved.
+     */
+    private List<BookChunkDocument> expandTruncated(List<BookChunkDocument> chunks, String userId) {
+        if (!ragProperties.expandTruncatedNeighbors() || chunkRepository == null || chunks.isEmpty()) {
+            return chunks;
+        }
+        NeighborExpander.Lookup lookup =
+                (bookId, index) -> chunkRepository.findNeighbor(bookId, userId, index);
+        List<BookChunkDocument> out = new ArrayList<>(chunks.size());
+        for (BookChunkDocument c : chunks) {
+            try {
+                out.add(NeighborExpander.expand(c, lookup, ragProperties.neighborMaxChars()));
+            } catch (RuntimeException e) {
+                log.debug("Neighbour expansion skipped: {}", e.getClass().getSimpleName());
+                out.add(c);
+            }
+        }
+        return out;
+    }
+
     /** Body text first (front/back matter only fills remaining slots), at most {@code topK} chunks. */
     private static List<BookChunkDocument> select(List<HybridHit> hits, int topK) {
         List<BookChunkDocument> body = new ArrayList<>();

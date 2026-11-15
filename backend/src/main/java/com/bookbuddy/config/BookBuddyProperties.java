@@ -37,6 +37,9 @@ public record BookBuddyProperties(
         if (safety == null) {
             safety = new Safety(List.of());
         }
+        if (prompt == null) {
+            prompt = new Prompt(null, null);
+        }
     }
 
     public record Cors(List<String> allowedOrigins) {
@@ -86,5 +89,20 @@ public record BookBuddyProperties(
 
     public record Quota(int dailyRequestSoftLimit) {}
 
-    public record Prompt(String chatSystemId) {}
+    /**
+     * Ids of versioned prompt files ({@code classpath:prompt/<id>.txt}). Blank values fall back to the defaults so
+     * a prompt can be rolled back by config alone (e.g. {@code CHAT_PROMPT_ID=chat.system.v1}).
+     */
+    public record Prompt(String chatSystemId, String queryRewriteId) {
+
+        public static final String DEFAULT_CHAT_SYSTEM_ID = "chat.system.v2";
+        public static final String DEFAULT_QUERY_REWRITE_ID = "query-rewrite.v1";
+
+        public Prompt {
+            chatSystemId = chatSystemId == null || chatSystemId.isBlank() ? DEFAULT_CHAT_SYSTEM_ID : chatSystemId.strip();
+            queryRewriteId = queryRewriteId == null || queryRewriteId.isBlank()
+                    ? DEFAULT_QUERY_REWRITE_ID
+                    : queryRewriteId.strip();
+        }
+    }
 }

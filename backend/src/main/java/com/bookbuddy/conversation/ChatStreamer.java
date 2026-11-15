@@ -30,7 +30,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
  * event: memory     data: {"memoryIds":[...]}               (memories that shaped the reply, when any)
  * event: safety     data: {"level","resources":[{"name","phone","personal"}]}
  * event: done       data: {"messageId","status","content","usage","modelId"}
- * event: error      data: {"code","message","retryable","messageId"}
+ * event: error      data: {"code","message","retryable","messageId","retryAfterSeconds"}
  * : keepalive                                              (comment every 15 s)
  * </pre>
  *

@@ -1,0 +1,16 @@
+.gradle/
+build/
+bin/
+out/
+.idea/
+uploads/
+tmp/
+models/*.onnx
+models/*.onnx_data
+.env
+.env.*
+!.env.example
+**/*.pem
+**/*.key
+**/application-local.yml
+*.log

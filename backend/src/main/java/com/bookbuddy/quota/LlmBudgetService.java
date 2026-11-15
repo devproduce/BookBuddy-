@@ -98,6 +98,16 @@ public class LlmBudgetService {
         return new Status(today(), used, dailyLimit, dailyLimit == 0 ? 0 : (double) used / dailyLimit);
     }
 
+    /** When the UTC-day counter starts again. */
+    public Instant resetsAt() {
+        return LocalDate.ofInstant(clock.instant(), ZoneOffset.UTC).plusDays(1).atStartOfDay().toInstant(ZoneOffset.UTC);
+    }
+
+    /** Current time as seen by the budget (for computing "resets in" values consistently). */
+    public Instant now() {
+        return clock.instant();
+    }
+
     /** When refused background work should be retried. */
     public Instant retryAt() {
         return clock.instant().plus(DEFER_FOR);
