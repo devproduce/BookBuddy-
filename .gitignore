@@ -24,8 +24,8 @@ backend/.idea/
 !**/gradle-wrapper.jar
 backend/tmp/
 backend/uploads/
-backend/models/*.onnx
-backend/models/*.onnx_data
+backend/models/*
+!backend/models/.gitkeep
 
 # Web
 web/node_modules/
@@ -50,6 +50,10 @@ mobile/**/flutter_export_environment.sh
 Thumbs.db
 *.log
 .cursor/
+backend/.classpath
+backend/.project
+backend/.settings/
+backend/bin/
 
 # Eval / local data
 docs/spikes/results/*.json

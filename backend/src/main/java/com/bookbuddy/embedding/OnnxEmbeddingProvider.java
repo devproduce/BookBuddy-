@@ -63,14 +63,20 @@ public class OnnxEmbeddingProvider implements EmbeddingProvider {
         status.setLoaded(false);
         status.setActiveModel(fallback.modelName());
 
-        Path model = Path.of(config.modelPath()).toAbsolutePath().normalize();
-        Path tokenizerPath = Path.of(config.tokenizerPath()).toAbsolutePath().normalize();
-        if (!Files.isRegularFile(model)) {
-            log.warn("Embedding model not found at {}; using hash fallback. Run scripts/download-e5-model.ps1", model);
+        Path model = resolveExisting(config.modelPath());
+        Path tokenizerPath = resolveExisting(config.tokenizerPath());
+        if (model == null) {
+            log.warn(
+                    "Embedding model not found at '{}' (cwd={}). Run scripts/download-e5-model.ps1",
+                    config.modelPath(),
+                    Path.of("").toAbsolutePath());
             return;
         }
-        if (!Files.isRegularFile(tokenizerPath)) {
-            log.warn("Tokenizer not found at {}; using hash fallback. Run scripts/download-e5-model.ps1", tokenizerPath);
+        if (tokenizerPath == null) {
+            log.warn(
+                    "Tokenizer not found at '{}' (cwd={}). Run scripts/download-e5-model.ps1",
+                    config.tokenizerPath(),
+                    Path.of("").toAbsolutePath());
             return;
         }
 
@@ -302,6 +308,37 @@ public class OnnxEmbeddingProvider implements EmbeddingProvider {
 
     private static String nullToEmpty(String text) {
         return text == null ? "" : text;
+    }
+
+    /**
+     * Resolves a model/tokenizer path against common working directories (project dir, cwd, repo root) so bootRun works
+     * whether started from {@code backend/} or the monorepo root.
+     */
+    private static Path resolveExisting(String configured) {
+        if (configured == null || configured.isBlank()) {
+            return null;
+        }
+        Path direct = Path.of(configured);
+        List<Path> candidates = new ArrayList<>();
+        candidates.add(direct);
+        if (!direct.isAbsolute()) {
+            candidates.add(Path.of("").toAbsolutePath().normalize().resolve(direct));
+            candidates.add(Path.of("").toAbsolutePath().normalize().resolve("backend").resolve(direct));
+            candidates.add(Path.of("backend").toAbsolutePath().normalize().resolve(direct));
+            // user.dir is often backend/ during bootRun; also try models next to the jar
+            String home = System.getProperty("user.dir");
+            if (home != null) {
+                candidates.add(Path.of(home).resolve(direct));
+                candidates.add(Path.of(home).resolve("backend").resolve(direct));
+            }
+        }
+        for (Path p : candidates) {
+            Path norm = p.toAbsolutePath().normalize();
+            if (Files.isRegularFile(norm)) {
+                return norm;
+            }
+        }
+        return null;
     }
 
     @Override
