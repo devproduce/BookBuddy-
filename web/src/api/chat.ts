@@ -100,6 +100,8 @@ export interface StreamHandlers {
   onToken?: (text: string) => void
   onCitations?: (citations: MessageCitation[]) => void
   onSafety?: (safety: SafetyEvent) => void
+  /** Ids of the memories that shaped this reply (sent just before `done`, only when there were any). */
+  onMemory?: (memoryIds: string[]) => void
   onDone?: (done: StreamDone) => void
   onError?: (error: StreamError) => void
 }
@@ -180,6 +182,9 @@ async function consume(
         break
       case 'safety':
         handlers.onSafety?.(payload as SafetyEvent)
+        break
+      case 'memory':
+        handlers.onMemory?.((payload as { memoryIds: string[] }).memoryIds)
         break
       case 'done':
         handlers.onDone?.(payload as StreamDone)

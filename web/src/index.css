@@ -1772,6 +1772,216 @@ textarea:focus {
   justify-content: flex-end;
 }
 
+/* ---------- memory page ---------- */
+.memory {
+  max-width: 760px;
+  margin: 0 auto;
+  display: grid;
+  gap: 1.5rem;
+}
+.memory__groups {
+  display: grid;
+  gap: 1.5rem;
+}
+.memory__snippet {
+  margin: 0;
+  padding: 0.3rem 0 0.3rem 1.1rem;
+  border-left: 3px solid var(--brass);
+  font: italic 400 1.08rem/1.65 var(--font-display);
+  color: var(--parchment-soft);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.memory__of {
+  font: 400 0.95rem var(--font-body);
+  color: var(--parchment-dim);
+}
+.memory__onboard {
+  border-color: rgb(207 169 90 / 0.4);
+  animation: fade 0.3s var(--ease);
+}
+.memory__onboard-actions {
+  justify-content: space-between;
+}
+.memory__textarea {
+  width: 100%;
+  min-height: 90px;
+  padding: 0.7rem 0.95rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: rgb(4 12 9 / 0.45);
+  color: var(--parchment);
+  font: 400 1.05rem/1.5 var(--font-body);
+  resize: vertical;
+  transition:
+    border-color 0.2s var(--ease),
+    box-shadow 0.2s var(--ease),
+    background 0.2s var(--ease);
+}
+.memory__textarea::placeholder {
+  color: var(--parchment-faint);
+}
+.memory__textarea:hover {
+  border-color: var(--parchment-dim);
+}
+.memory__textarea:focus {
+  outline: none;
+  border-color: var(--brass-bright);
+  background: rgb(4 12 9 / 0.7);
+  box-shadow: 0 0 0 3px rgb(207 169 90 / 0.22);
+}
+.memory__add {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.45fr) minmax(0, 1fr) auto;
+  gap: 0.9rem;
+  align-items: end;
+}
+.memory__group-head {
+  align-items: flex-start;
+}
+.memory__hint {
+  margin-top: 0.2rem;
+  font-size: 0.92rem;
+  color: var(--parchment-dim);
+}
+.memory__list {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.memory__item {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgb(4 12 9 / 0.3);
+  transition: border-color 0.2s var(--ease);
+}
+.memory__item:hover {
+  border-color: var(--border-strong);
+}
+.memory__item.is-pinned {
+  border-color: rgb(207 169 90 / 0.45);
+}
+.memory__text {
+  margin: 0;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.memory__pin {
+  margin-right: 0.45rem;
+  color: var(--brass-bright);
+}
+.memory__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+}
+.memory__date {
+  font-size: 0.85rem;
+  color: var(--parchment-faint);
+}
+.memory__ask {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0.55rem 0.75rem;
+  border-radius: var(--radius-sm);
+  background: rgb(207 169 90 / 0.1);
+  color: var(--parchment-soft);
+}
+.memory__actions {
+  display: flex;
+  gap: 1rem;
+}
+.memory__forget {
+  color: var(--danger);
+  text-decoration-color: rgb(227 135 122 / 0.4);
+}
+.memory__edit {
+  display: grid;
+  gap: 0.7rem;
+}
+.memory__danger {
+  border-color: rgb(227 135 122 / 0.28);
+}
+.tag--warn {
+  color: var(--ember);
+  border-color: rgb(229 154 124 / 0.45);
+}
+
+/* "why this answer" drawer */
+.why__section {
+  display: grid;
+  gap: 0.6rem;
+}
+.why__heading {
+  margin: 0;
+  font: 500 1.05rem var(--font-display);
+  color: var(--parchment);
+}
+.why__list {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.why__item {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgb(4 12 9 / 0.3);
+}
+.why__text {
+  margin: 0;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.why__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+}
+
+/* settings: danger zone */
+.danger-zone {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid rgb(227 135 122 / 0.35);
+  border-radius: var(--radius);
+  background: rgb(227 135 122 / 0.05);
+}
+.danger-zone__title {
+  margin: 0;
+  font: 500 1.1rem var(--font-display);
+  color: var(--danger);
+}
+.danger-zone__confirm {
+  display: grid;
+  gap: 0.9rem;
+}
+
+@media (max-width: 640px) {
+  .memory__add {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* live switch + settings extras */
 .toggle-row--live {
   opacity: 1;

@@ -1,7 +1,7 @@
 import { formatPages } from '../../api/books'
 import type { MessageCitation, SafetyEvent } from '../../api/chat'
 import { CrisisCard } from './CrisisCard'
-import type { UiMessage } from './types'
+import { isLocalId, type UiMessage } from './types'
 
 function renderText(m: UiMessage, onCite: (c: MessageCitation) => void) {
   return m.content.split(/(\[\d+\])/g).map((part, i) => {
@@ -30,6 +30,7 @@ export function MessageBubble({
   canRegenerate,
   disabled,
   onCite,
+  onWhy,
   onRetry,
 }: {
   message: UiMessage
@@ -38,6 +39,7 @@ export function MessageBubble({
   canRegenerate: boolean
   disabled: boolean
   onCite: (c: MessageCitation) => void
+  onWhy: (m: UiMessage) => void
   onRetry: (m: UiMessage) => void
 }) {
   const mine = message.role === 'USER'
@@ -78,6 +80,17 @@ export function MessageBubble({
             ))}
           </ul>
         )}
+
+        {!mine &&
+          !message.streaming &&
+          !isLocalId(message.id) &&
+          (message.memoryIdsUsed.length > 0 || message.citations.length > 0) && (
+            <div className="msg__actions">
+              <button type="button" className="link-btn" onClick={() => onWhy(message)}>
+                Why this answer?
+              </button>
+            </div>
+          )}
 
         {(failed || interrupted) && (
           <div className="msg__status" role="status">

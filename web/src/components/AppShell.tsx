@@ -53,7 +53,7 @@ const NAV = [
   { to: '/', label: 'Home', icon: 'home', end: true },
   { to: '/library', label: 'Library', icon: 'library' },
   { to: '/chat', label: 'Chat', icon: 'chat' },
-  { to: '/memory', label: 'Memory', icon: 'memory', soon: true },
+  { to: '/memory', label: 'Memory', icon: 'memory' },
   { to: '/settings', label: 'Settings', icon: 'settings' },
 ] as const
 
@@ -71,26 +71,15 @@ export function AppShell() {
         </NavLink>
         <nav className="nav" aria-label="Primary">
           {NAV.map((item) => {
-            const soon = 'soon' in item && item.soon
-            const content = (
-              <>
-                <Icon name={item.icon} />
-                <span className="nav__label">{item.label}</span>
-                {soon && <span className="nav__soon">Soon</span>}
-              </>
-            )
-            return soon ? (
-              <span key={item.to} className="nav__item nav__item--disabled" aria-disabled="true">
-                {content}
-              </span>
-            ) : (
+            return (
               <NavLink
                 key={item.to}
                 to={item.to}
                 end={'end' in item ? item.end : false}
                 className={({ isActive }) => `nav__item${isActive ? ' is-active' : ''}`}
               >
-                {content}
+                <Icon name={item.icon} />
+                <span className="nav__label">{item.label}</span>
               </NavLink>
             )
           })}

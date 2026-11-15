@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import type { CrisisContact } from '../api/auth'
+import { accountApi } from '../api/memory'
 import { settingsApi, type Settings } from '../api/settings'
 import { useAuth } from '../auth/useAuth'
 import { Alert } from '../components/Alert'
@@ -24,6 +25,10 @@ export function SettingsPage() {
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [deleteText, setDeleteText] = useState('')
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     const ctrl = new AbortController()
@@ -53,6 +58,41 @@ export function SettingsPage() {
       setError(errorMessage(err))
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function onExport() {
+    setExporting(true)
+    setError(null)
+    setNotice(null)
+    try {
+      await accountApi.downloadExport()
+      setNotice('Your export has been downloaded.')
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  async function onDeleteAll(e: FormEvent) {
+    e.preventDefault()
+    if (deleteText.trim() !== 'DELETE') return
+    if (!window.confirm('Last chance: delete ALL your books, conversations and memories? This cannot be undone.')) return
+    setDeleting(true)
+    setError(null)
+    setNotice(null)
+    try {
+      const r = await accountApi.deleteAllData()
+      setConfirmingDelete(false)
+      setDeleteText('')
+      setNotice(
+        `Deleted ${r.books} ${r.books === 1 ? 'book' : 'books'}, ${r.conversations} ${r.conversations === 1 ? 'conversation' : 'conversations'} and ${r.memories} ${r.memories === 1 ? 'memory' : 'memories'}.`,
+      )
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -228,19 +268,95 @@ export function SettingsPage() {
       <section className="panel">
         <header className="panel__head">
           <h2>Memory</h2>
-          <span className="tag">Soon</span>
+          <Link to="/memory" className="link-btn">
+            Manage memories
+          </Link>
         </header>
-        <div className="toggle-row">
+        <div className="toggle-row toggle-row--live">
           <div>
             <strong>Let Book Buddy remember me</strong>
             <p className="panel__note">
               Remember your tastes and past conversations to make recommendations more personal.
             </p>
           </div>
-          <label className="switch" aria-label="Memory (coming soon)">
-            <input type="checkbox" checked={settings?.memoryEnabled ?? false} disabled readOnly />
+          <label className="switch switch--live" aria-label="Let Book Buddy remember me">
+            <input
+              type="checkbox"
+              checked={settings?.memoryEnabled ?? false}
+              disabled={busy || !settings}
+              onChange={(e) =>
+                void save(
+                  { memoryEnabled: e.target.checked },
+                  e.target.checked ? 'Memory is on.' : 'Memory is paused.',
+                )
+              }
+            />
             <span className="switch__track" />
           </label>
+        </div>
+      </section>
+
+      <section className="panel">
+        <header className="panel__head">
+          <h2>Your data</h2>
+        </header>
+        <p className="panel__note">
+          Download a copy of everything Book Buddy holds about you: books, conversations and memories, as one JSON file.
+        </p>
+        <div className="panel__actions">
+          <button type="button" className="btn btn--sm btn--ghost" disabled={exporting} onClick={() => void onExport()}>
+            {exporting ? 'Preparing…' : 'Export my data'}
+          </button>
+        </div>
+
+        <div className="danger-zone">
+          <h3 className="danger-zone__title">Delete all my data</h3>
+          <p className="panel__note">
+            Permanently removes every book, conversation and memory. Your account and settings stay. This can't be
+            undone, so consider exporting first.
+          </p>
+          {confirmingDelete ? (
+            <form className="danger-zone__confirm" onSubmit={onDeleteAll}>
+              <label className="field">
+                <span className="field__label">Type DELETE to confirm</span>
+                <input
+                  type="text"
+                  value={deleteText}
+                  autoComplete="off"
+                  autoFocus
+                  spellCheck={false}
+                  placeholder="DELETE"
+                  onChange={(e) => setDeleteText(e.target.value)}
+                />
+              </label>
+              <div className="panel__actions">
+                <button
+                  type="submit"
+                  className="btn btn--sm btn--danger"
+                  disabled={deleting || deleteText.trim() !== 'DELETE'}
+                >
+                  {deleting ? 'Deleting…' : 'Permanently delete everything'}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--sm btn--ghost"
+                  disabled={deleting}
+                  onClick={() => {
+                    setConfirmingDelete(false)
+                    setDeleteText('')
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          ) : (
+            <div className="panel__actions">
+              <button type="button" className="btn btn--sm btn--danger" onClick={() => setConfirmingDelete(true)}>
+                Delete all data…
+              </button>
+            </div>
+          )}
         </div>
       </section>
 

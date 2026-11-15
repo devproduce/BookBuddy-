@@ -16,6 +16,7 @@ import { ConsentGate } from '../components/chat/ConsentGate'
 import { MessageBubble } from '../components/chat/MessageBubble'
 import { NewChatPanel, type NewChatOptions } from '../components/chat/NewChatPanel'
 import { PassagePanel } from '../components/chat/PassagePanel'
+import { WhyPanel } from '../components/chat/WhyPanel'
 import { isLocalId, toUi, uid, type UiMessage } from '../components/chat/types'
 import { errorMessage } from '../components/errorMessage'
 
@@ -93,6 +94,7 @@ function Chat() {
   const [error, setError] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [passage, setPassage] = useState<MessageCitation | null>(null)
+  const [whyKey, setWhyKey] = useState<string | null>(null)
 
   const abortRef = useRef<AbortController | null>(null)
   /** Conversation whose messages are currently held in state. */
@@ -147,6 +149,7 @@ function Chat() {
     abortRef.current?.abort()
     threadIdRef.current = activeId ?? null
     setPassage(null)
+    setWhyKey(null)
     setError(null)
     setNotFound(false)
     setMessages([])
@@ -237,6 +240,7 @@ function Chat() {
             onToken: (text) => patch((m) => ({ content: m.content + text })),
             onCitations: (citations) => patch({ citations }),
             onSafety: (safety: SafetyEvent) => patch({ safety, safetyLevel: safety.level }),
+            onMemory: (memoryIds) => patch({ memoryIdsUsed: memoryIds }),
             onDone: (done) => {
               finished = true
               patch({
@@ -400,6 +404,12 @@ function Chat() {
   }, [messages])
 
   const inThread = Boolean(activeId)
+  const whyMessage = whyKey ? (messages.find((m) => m.key === whyKey) ?? null) : null
+
+  /** Opening a passage replaces the "why" drawer; closing the passage brings it back. */
+  function openPassage(c: MessageCitation) {
+    setPassage(c)
+  }
 
   return (
     <div className={`chat${inThread ? ' chat--thread' : ''}`}>
@@ -499,7 +509,11 @@ function Chat() {
                     fallbackSafety={fallbackSafety}
                     canRegenerate={m.key === lastAssistantKey}
                     disabled={busy}
-                    onCite={setPassage}
+                    onCite={openPassage}
+                    onWhy={(m) => {
+                      setPassage(null)
+                      setWhyKey(m.key)
+                    }}
                     onRetry={retry}
                   />
                 ))}
@@ -546,6 +560,9 @@ function Chat() {
       </section>
 
       {passage && <PassagePanel citation={passage} onClose={() => setPassage(null)} />}
+      {whyMessage && !passage && (
+        <WhyPanel message={whyMessage} onClose={() => setWhyKey(null)} onCite={openPassage} />
+      )}
     </div>
   )
 }
