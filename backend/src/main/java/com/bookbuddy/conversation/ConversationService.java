@@ -433,6 +433,13 @@ public class ConversationService {
         String searchQuery = retrieve ? searchQueryFor(turn, userId, question) : question;
         Retrieval retrieval = retrieve ? rag.retrieve(userId, searchQuery, conversation.scopedBookIds()) : null;
         boolean hasPassages = retrieval != null && !retrieval.isEmpty();
+        log.info(
+                "chat intent={} retrieve={} passages={} scope={} conversationId={}",
+                intent,
+                retrieve,
+                hasPassages ? retrieval.chunks().size() : 0,
+                scope.mode(),
+                conversation.getId());
 
         MemoryContext memory = llm.isConfigured() ? recall(userId, question) : MemoryContext.EMPTY;
         List<ChatMessage> prompt = buildPrompt(turn, level, scope, retrieve, retrieval, memory);
@@ -613,7 +620,13 @@ public class ConversationService {
         if (scope.mode() == ScopeMode.NONE) {
             system.append("- The user turned book lookup off for this chat. Do not claim to consult their books.\n");
         } else if (retrieve && (retrieval == null || retrieval.isEmpty())) {
-            system.append("- No relevant passages were found in the user's books for this message.\n");
+            system.append("- No relevant passages were found in the user's books for this message. "
+                    + "Do not invent content from their books; you may still answer helpfully in general terms "
+                    + "and say you could not find a matching passage.\n");
+        } else if (retrieve && retrieval != null && !retrieval.isEmpty() && level != RiskLevel.ACUTE) {
+            system.append("- Passages from the user's library are included below. Prefer grounding your reply in them "
+                    + "when the question is about their books or when a passage genuinely illuminates what they said. "
+                    + "If they are only venting and no passage fits, stay with their feelings and skip the books.\n");
         }
         if (level == RiskLevel.ELEVATED) {
             system.append("- Safety note: the user may be in distress. Be especially gentle, do not minimise what "

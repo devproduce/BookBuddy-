@@ -378,13 +378,19 @@ class ConversationServiceTest {
     // ---------------------------------------------------------------------------------------------------------
 
     @Test
-    void chitchatAndVentingSkipBookRetrieval() {
+    void chitchatSkipsBookRetrievalWhileVentingMaySearch() {
         llmStreams("Hi! How are you?");
-
         run("hello");
+        verifyNoInteractions(search);
+
+        // Soft retrieval: venting still searches the library; empty hits are fine, LLM still answers.
+        when(search.search(anyString(), anyString(), any(float[].class), anyCollection(), anyInt(), anyDouble()))
+                .thenReturn(List.of());
+        llmStreams("That sounds exhausting. I'm here with you.");
         run("I feel so tired and stressed today, I just need to vent");
 
-        verifyNoInteractions(search);
+        verify(search, org.mockito.Mockito.atLeastOnce())
+                .search(anyString(), anyString(), any(float[].class), anyCollection(), anyInt(), anyDouble());
         verify(llm, org.mockito.Mockito.times(2)).streamChat(any(), any(), any(), any());
         assertEquals(2, stored(Role.ASSISTANT).size());
         assertTrue(stored(Role.ASSISTANT).stream().allMatch(m -> m.getCitations().isEmpty()));
@@ -860,8 +866,9 @@ class ConversationServiceTest {
 
     @Test
     void chatCallsAreCountedAgainstTheSharedBudget() {
+        // Chitchat skips retrieval and always hits the LLM path (book questions with empty hits go offline).
         llmStreams("Sure.");
-        run("tell me something");
+        run("hello");
         verify(budget).record(eq(USER), eq(LlmBudgetService.Priority.CHAT), eq("test-model"), any(), org.mockito.ArgumentMatchers.anyLong(), eq(true));
     }
 

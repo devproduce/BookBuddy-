@@ -19,8 +19,13 @@ public class IntentRouter {
         MIXED,
         CHITCHAT;
 
+        /**
+         * Whether to search the user's library. Personal reflection still retrieves so Book Buddy can offer a
+         * relevant passage when it helps; the system prompt forbids forcing books into pure venting.
+         * Only chitchat skips retrieval entirely.
+         */
         public boolean needsBooks() {
-            return this == BOOK_QUESTION || this == MIXED;
+            return this != CHITCHAT;
         }
     }
 
@@ -34,8 +39,9 @@ public class IntentRouter {
             "book", "books", "chapter", "chapters", "character", "characters", "author", "novel", "plot", "passage",
             "quote", "quotes", "page", "pages", "story", "stories", "protagonist", "antagonist", "theme", "themes",
             "ending", "scene", "summarize", "summarise", "summary", "according to", "in the book", "the author",
-            "narrator", "symbolism", "metaphor", "kitab", "kitaab", "किताब", "पुस्तक", "कहानी", "अध्याय", "किरदार",
-            "पात्र", "लेखक");
+            "narrator", "symbolism", "metaphor", "wisdom", "lesson", "lessons", "philosophy", "teaching", "teachings",
+            "what does it say", "what does the book", "from the book", "my library", "this book", "that book",
+            "kitab", "kitaab", "किताब", "पुस्तक", "कहानी", "अध्याय", "किरदार", "पात्र", "लेखक", "सीख");
 
     private static final List<String> PERSONAL_CUES = List.of(
             "i feel", "i'm feeling", "im feeling", "i am feeling", "i felt", "i've been feeling", "ive been feeling",
@@ -72,11 +78,11 @@ public class IntentRouter {
             return Intent.PERSONAL_REFLECTION;
         }
         int words = TextTokens.tokenize(t).size();
-        if (words <= 2) {
+        if (words <= 2 && !scopeOne) {
             return Intent.CHITCHAT;
         }
-        // Unclear: a question, or a chat pinned to one book, is most likely about the books.
-        return scopeOne || t.contains("?") ? Intent.BOOK_QUESTION : Intent.PERSONAL_REFLECTION;
+        // Unclear substantive messages default to the library — this is a reading companion.
+        return Intent.BOOK_QUESTION;
     }
 
     private static boolean containsAny(String text, List<String> cues) {

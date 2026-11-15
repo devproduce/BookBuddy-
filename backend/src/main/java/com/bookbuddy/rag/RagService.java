@@ -51,8 +51,11 @@ public class RagService {
             "I couldn't find anything relevant to that in your library. Try rephrasing the question, or make sure "
                     + "the book has finished processing.";
 
-    /** Minimum cosine for the (lexical) hash embedder, whose scores are not comparable to E5's. */
-    private static final double HASH_VECTOR_FLOOR = 0.1;
+    /**
+     * Minimum cosine for the (lexical) hash embedder. Kept very low so weak lexical matches still enter RRF;
+     * keyword search carries most of the weight until a real E5 model is loaded.
+     */
+    private static final double HASH_VECTOR_FLOOR = 0.02;
 
     private static final int EXTRACTIVE_PASSAGES = 3;
     private static final int EXTRACTIVE_SENTENCES_PER_PASSAGE = 2;

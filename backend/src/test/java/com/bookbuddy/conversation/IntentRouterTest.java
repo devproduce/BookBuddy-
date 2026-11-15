@@ -20,7 +20,8 @@ class IntentRouterTest {
     }
 
     @Test
-    void ventingIsPersonalReflectionAndSkipsBooks() {
+    void ventingIsPersonalReflectionButStillMayRetrieve() {
+        // Soft retrieval: passages are offered; the system prompt forbids forcing books into pure venting.
         for (String s : new String[] {
             "I feel so tired and stressed today",
             "I just need to vent about my boss",
@@ -29,7 +30,7 @@ class IntentRouterTest {
             "\u092E\u0941\u091D\u0947 \u092C\u0939\u0941\u0924 \u0909\u0926\u093E\u0938 \u0932\u0917 \u0930\u0939\u093E \u0939\u0948"}) {
             Intent intent = router.route(s, false);
             assertEquals(Intent.PERSONAL_REFLECTION, intent, s);
-            assertFalse(intent.needsBooks());
+            assertTrue(intent.needsBooks());
         }
     }
 
@@ -54,15 +55,27 @@ class IntentRouterTest {
 
     @Test
     void asciiCuesNeedWordBoundaries() {
-        // "stage" contains "age"/"tag" style substrings; "page" must not fire inside other words
-        assertEquals(Intent.PERSONAL_REFLECTION, router.route("we are on a different stage of life honestly", false));
+        // "page" must not fire inside other words; without personal/book cues this is a book-default message
+        Intent intent = router.route("we are on a different stage of life honestly", false);
+        assertEquals(Intent.BOOK_QUESTION, intent);
+        assertFalse(intent.name().isBlank());
     }
 
     @Test
-    void unclearMessagesDependOnQuestionMarkAndPinnedBook() {
+    void unclearSubstantiveMessagesDefaultToBookQuestion() {
         assertEquals(Intent.BOOK_QUESTION, router.route("what happens next?", false));
         assertEquals(Intent.BOOK_QUESTION, router.route("tell me what happens next", true));
-        assertEquals(Intent.PERSONAL_REFLECTION, router.route("tell me what happens next", false));
+        assertEquals(Intent.BOOK_QUESTION, router.route("tell me what happens next", false));
+        assertEquals(Intent.BOOK_QUESTION, router.route("explain the idea of detachment", false));
         assertEquals(Intent.CHITCHAT, router.route("", false));
+        assertEquals(Intent.CHITCHAT, router.route("ok", false));
+    }
+
+    @Test
+    void onlyChitchatSkipsBookRetrieval() {
+        assertFalse(Intent.CHITCHAT.needsBooks());
+        assertTrue(Intent.BOOK_QUESTION.needsBooks());
+        assertTrue(Intent.MIXED.needsBooks());
+        assertTrue(Intent.PERSONAL_REFLECTION.needsBooks());
     }
 }
