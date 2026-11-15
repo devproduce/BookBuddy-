@@ -3,12 +3,14 @@ package com.bookbuddy.embedding;
 import ai.djl.huggingface.tokenizers.Encoding;
 import ai.djl.huggingface.tokenizers.HuggingFaceTokenizer;
 import ai.onnxruntime.OnnxTensor;
+import ai.onnxruntime.OnnxValue;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
 import com.bookbuddy.config.BookBuddyProperties;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
+import java.io.IOException;
 import java.nio.LongBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -16,6 +18,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -79,11 +82,17 @@ public class OnnxEmbeddingProvider implements EmbeddingProvider {
             session = env.createSession(model.toString(), opts);
 
             Set<String> inputs = session.getInputNames();
+            if (inputs == null || inputs.isEmpty()) {
+                throw new IllegalStateException("ONNX model has no inputs");
+            }
             inputIdsName = inputs.contains("input_ids") ? "input_ids" : inputs.iterator().next();
             attentionMaskName = inputs.contains("attention_mask") ? "attention_mask" : inputIdsName;
             wantsTokenTypeIds = inputs.contains("token_type_ids");
 
             Set<String> outputs = session.getOutputNames();
+            if (outputs == null || outputs.isEmpty()) {
+                throw new IllegalStateException("ONNX model has no outputs");
+            }
             if (outputs.contains("last_hidden_state")) {
                 outputName = "last_hidden_state";
             } else if (outputs.contains("sentence_embedding")) {
@@ -103,7 +112,7 @@ public class OnnxEmbeddingProvider implements EmbeddingProvider {
                     inputs,
                     outputName,
                     modelDimension);
-        } catch (Throwable t) {
+        } catch (IOException | OrtException | RuntimeException | LinkageError t) {
             closeQuietly();
             modelActive = false;
             status.setLoaded(false);
@@ -118,22 +127,22 @@ public class OnnxEmbeddingProvider implements EmbeddingProvider {
     }
 
     private void closeQuietly() {
-        try {
-            if (session != null) {
+        if (session != null) {
+            try {
                 session.close();
+            } catch (Exception ignored) {
+                // ignore
             }
-        } catch (Exception ignored) {
-            // ignore
+            session = null;
         }
-        session = null;
-        try {
-            if (tokenizer != null) {
+        if (tokenizer != null) {
+            try {
                 tokenizer.close();
+            } catch (Exception ignored) {
+                // ignore
             }
-        } catch (Exception ignored) {
-            // ignore
+            tokenizer = null;
         }
-        tokenizer = null;
         env = null;
     }
 
@@ -175,7 +184,7 @@ public class OnnxEmbeddingProvider implements EmbeddingProvider {
 
         List<OnnxTensor> owned = new ArrayList<>();
         try {
-            long[] shape = {1, ids.length};
+            long[] shape = new long[] {1L, ids.length};
             OnnxTensor idsTensor = OnnxTensor.createTensor(env, LongBuffer.wrap(ids), shape);
             owned.add(idsTensor);
             Map<String, OnnxTensor> feeds = new HashMap<>();
@@ -193,8 +202,11 @@ public class OnnxEmbeddingProvider implements EmbeddingProvider {
                 feeds.put("token_type_ids", typeTensor);
             }
 
-            try (OrtSession.Result result = session.run(feeds)) {
+            OrtSession.Result result = session.run(feeds);
+            try {
                 return poolAndNormalize(result, mask);
+            } finally {
+                result.close();
             }
         } catch (OrtException e) {
             throw new IllegalStateException("ONNX inference failed: " + e.getMessage(), e);
@@ -210,13 +222,19 @@ public class OnnxEmbeddingProvider implements EmbeddingProvider {
     }
 
     private float[] poolAndNormalize(OrtSession.Result result, long[] attentionMask) throws OrtException {
-        OnnxTensor out = (OnnxTensor) result.get(outputName).orElseGet(() -> result.get(0));
+        OnnxValue raw = resolveOutput(result);
+        if (!(raw instanceof OnnxTensor)) {
+            throw new IllegalStateException("Unexpected ONNX output value: " + raw.getClass().getName());
+        }
+        OnnxTensor out = (OnnxTensor) raw;
         Object value = out.getValue();
 
-        if (value instanceof float[] flat) {
+        if (value instanceof float[]) {
+            float[] flat = (float[]) value;
             return VectorMath.l2Normalize(flat.clone());
         }
-        if (value instanceof float[][] matrix) {
+        if (value instanceof float[][]) {
+            float[][] matrix = (float[][]) value;
             // [1][dim] sentence embedding, or [seq][hidden] without batch
             if (matrix.length == 1 && matrix[0].length != attentionMask.length) {
                 return VectorMath.l2Normalize(matrix[0].clone());
@@ -226,13 +244,28 @@ public class OnnxEmbeddingProvider implements EmbeddingProvider {
             }
             return VectorMath.l2Normalize(matrix[0].clone());
         }
-        if (value instanceof float[][][] hidden) {
+        if (value instanceof float[][][]) {
+            float[][][] hidden = (float[][][]) value;
             return meanPool(hidden[0], attentionMask);
         }
         throw new IllegalStateException("Unexpected ONNX output type: " + value.getClass().getName());
     }
 
+    private OnnxValue resolveOutput(OrtSession.Result result) {
+        Optional<OnnxValue> named = result.get(outputName);
+        if (named.isPresent()) {
+            return named.get();
+        }
+        if (result.size() == 0) {
+            throw new IllegalStateException("ONNX result is empty");
+        }
+        return result.get(0);
+    }
+
     private float[] meanPool(float[][] tokenVectors, long[] attentionMask) {
+        if (tokenVectors == null || tokenVectors.length == 0 || tokenVectors[0] == null) {
+            throw new IllegalStateException("Empty ONNX hidden state");
+        }
         int hidden = tokenVectors[0].length;
         float[] sum = new float[hidden];
         float count = 0f;
@@ -256,6 +289,9 @@ public class OnnxEmbeddingProvider implements EmbeddingProvider {
     }
 
     private static long[] truncate(long[] src, int max) {
+        if (src == null) {
+            return new long[0];
+        }
         if (src.length <= max) {
             return src;
         }
