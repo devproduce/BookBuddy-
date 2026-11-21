@@ -615,18 +615,30 @@ public class ConversationService {
 
         StringBuilder system = new StringBuilder(prompts.chatSystemPrompt());
         system.append("\n\n# This conversation\n");
+        String name = turn.user() == null ? null : turn.user().getDisplayName();
+        if (name != null && !name.isBlank()) {
+            system.append("- The user's name is ").append(name.strip())
+                    .append(". Use it like a friend would — in the opening or when comfort lands. "
+                            + "Do not open every reply with name + generic empathy.\n");
+        } else {
+            system.append("- No display name is available for this user. Speak warmly without inventing a name.\n");
+        }
         system.append("- Preferred language: ").append(turn.language() == null ? "en" : turn.language())
                 .append(". Still mirror the language and script of the latest user message.\n");
+        system.append("- Write for THIS situation. Name their real pattern, apply any book wisdom to it, "
+                + "and sound like a friend — never the template of empathy + passage dump + technique + "
+                + "\"How does that feel?\".\n");
         if (scope.mode() == ScopeMode.NONE) {
             system.append("- The user turned book lookup off for this chat. Do not claim to consult their books.\n");
         } else if (retrieve && (retrieval == null || retrieval.isEmpty())) {
             system.append("- No relevant passages were found in the user's books for this message. "
-                    + "Do not invent content from their books; you may still answer helpfully in general terms "
+                    + "Do not invent content from their books; you may still answer as their friend in general terms "
                     + "and say you could not find a matching passage.\n");
         } else if (retrieve && retrieval != null && !retrieval.isEmpty() && level != RiskLevel.ACUTE) {
-            system.append("- Passages from the user's library are included below. Prefer grounding your reply in them "
-                    + "when the question is about their books or when a passage genuinely illuminates what they said. "
-                    + "If they are only venting and no passage fits, stay with their feelings and skip the books.\n");
+            system.append("- Passages from the user's library are included below. When one fits, bring its wisdom "
+                    + "the way a friend recalls a line, then use it to tackle their exact situation — do not "
+                    + "paraphrase the passage as a tip card. If they are only venting and nothing fits, stay with "
+                    + "them and skip the books.\n");
         }
         if (level == RiskLevel.ELEVATED) {
             system.append("- Safety note: the user may be in distress. Be especially gentle, do not minimise what "

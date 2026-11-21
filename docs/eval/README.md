@@ -95,8 +95,8 @@ Target from the PRD: at least 90% of extracted memories judged accurate, and at 
 personalisation in replies.
 
 **Emotional quality:** follow `emotional-rubric.md` (scenarios, judge prompt, manual review of 20 transcripts).
-Record `promptVersion` with every score so prompts can be compared: `chat.system.v2` is the default; set
-`CHAT_PROMPT_ID=chat.system.v1` to run the previous prompt for an A/B comparison.
+Record `promptVersion` with every score so prompts can be compared: `chat.system.v3` is the default; set
+`CHAT_PROMPT_ID=chat.system.v2` to run the previous prompt for an A/B comparison.
 
 ## Comparing prompt versions
 

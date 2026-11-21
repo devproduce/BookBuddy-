@@ -124,6 +124,7 @@ class ConversationServiceTest {
 
         user = new UserDocument();
         user.setId(USER);
+        user.setDisplayName("Himan");
         user.setConsent(new UserDocument.Consent("v1", Instant.now()));
         user.setDefaultLanguage("en");
         when(users.findById(USER)).thenReturn(Optional.of(user));
@@ -436,7 +437,7 @@ class ConversationServiceTest {
         assertEquals(3, cite.pageStart());
         assertEquals("The keeper lived alone for forty years.", cite.excerpt());
         assertEquals("test-model", reply.getModelId());
-        assertEquals("chat.system.v2", reply.getPromptVersion());
+        assertEquals("chat.system.v3", reply.getPromptVersion());
         assertEquals(150, reply.getTokenUsage().totalTokens());
         assertEquals(Status.COMPLETE, reply.getStatus());
 
@@ -444,6 +445,7 @@ class ConversationServiceTest {
         List<ChatMessage> sent = prompt.getValue();
         assertEquals("system", sent.get(0).role());
         assertTrue(sent.get(0).content().contains("Book Buddy"));
+        assertTrue(sent.get(0).content().contains("The user's name is Himan"));
         ChatMessage last = sent.get(sent.size() - 1);
         assertEquals("user", last.role());
         assertTrue(last.content().contains("<<<PASSAGE 1 | The Lighthouse | p. 3>>>"));

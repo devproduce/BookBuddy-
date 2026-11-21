@@ -70,8 +70,8 @@ bookbuddy:
   quota:
     daily-request-soft-limit: ${LLM_DAILY_SOFT_LIMIT:900}
   prompt:
-    # versioned files in src/main/resources/prompt/<id>.txt; set CHAT_PROMPT_ID=chat.system.v1 to roll back
-    chat-system-id: ${CHAT_PROMPT_ID:chat.system.v2}
+    # versioned files in src/main/resources/prompt/<id>.txt; set CHAT_PROMPT_ID=chat.system.v2 to roll back
+    chat-system-id: ${CHAT_PROMPT_ID:chat.system.v3}
     query-rewrite-id: ${QUERY_REWRITE_PROMPT_ID:query-rewrite.v1}
   rag:
     # complete passages that start/end mid-sentence from the neighbouring chunk
