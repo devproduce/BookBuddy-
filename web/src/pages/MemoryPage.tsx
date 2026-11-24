@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import {
   MEMORY_CATEGORIES,
   memoryApi,
+  sourceTag,
   type Memory,
   type MemoryCategory,
   type MemoryProfile,
@@ -13,54 +14,52 @@ import { strings } from '../i18n'
 
 const MAX_LEN = 500
 
+const MANUAL_ADD_CATEGORIES = MEMORY_CATEGORIES.filter(
+  (c) => c.id !== 'PERSONALITY_OBSERVATION' && c.id !== 'THINKING_PATTERN',
+)
+
 const ONBOARDING: { category: MemoryCategory; question: string; placeholder: string; prefix?: string }[] = [
   {
-    category: 'INTERESTS',
+    category: 'READING_PREFERENCE',
     question: 'What kinds of books do you love most?',
     placeholder: 'e.g. slow-burn mysteries, narrative history, cosy fantasy',
     prefix: 'Loves ',
   },
   {
-    category: 'INTERESTS',
+    category: 'READING_PREFERENCE',
     question: 'Any favourite authors or books you keep returning to?',
     placeholder: 'e.g. Ursula K. Le Guin, Pride and Prejudice',
     prefix: 'Favourites: ',
   },
   {
-    category: 'PREFERENCES',
+    category: 'READING_PREFERENCE',
     question: 'Is there anything you tend to avoid or dislike in a book?',
     placeholder: 'e.g. graphic violence, very long series',
     prefix: 'Prefers to avoid: ',
   },
   {
-    category: 'PREFERENCES',
+    category: 'COMMUNICATION_STYLE',
     question: 'How do you like to read, and how should I talk to you about books?',
     placeholder: 'e.g. short evening sessions; keep answers brief and spoiler-free',
   },
   {
-    category: 'GOALS',
+    category: 'GOAL',
     question: 'What are you hoping to get from your reading right now?',
     placeholder: 'e.g. read 20 books this year, learn about economics, unwind',
     prefix: 'Reading goal: ',
   },
   {
-    category: 'ABOUT_ME',
+    category: 'PERSONAL_BACKGROUND',
     question: 'Anything about you that helps me recommend better?',
     placeholder: 'e.g. I commute an hour each way; English is my second language',
   },
   {
-    category: 'EXPERIENCES',
+    category: 'EXPERIENCE',
     question: 'What is the best book you have read recently, and why?',
     placeholder: 'e.g. Piranesi — loved the strange, quiet atmosphere',
     prefix: 'Recently enjoyed: ',
   },
 ]
-
-function sourceTag(m: Memory) {
-  if (m.userVerified) return { text: 'Confirmed', warn: false }
-  if (m.classification === 'EXPLICIT') return { text: 'You said', warn: false }
-  return { text: 'Guess', warn: true }
-}
 
 export function MemoryPage() {
   const [memories, setMemories] = useState<Memory[] | null>(null)
@@ -73,11 +72,12 @@ export function MemoryPage() {
 
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
-  const [editCategory, setEditCategory] = useState<MemoryCategory>('ABOUT_ME')
+  const [editCategory, setEditCategory] = useState<MemoryCategory>('PERSONAL_BACKGROUND')
 
-  const [addCategory, setAddCategory] = useState<MemoryCategory>('INTERESTS')
+  const [addCategory, setAddCategory] = useState<MemoryCategory>('INTEREST')
   const [addText, setAddText] = useState('')
   const [adding, setAdding] = useState(false)
+  const [rebuilding, setRebuilding] = useState(false)
 
   const [onboarding, setOnboarding] = useState(false)
   const [step, setStep] = useState(0)
@@ -253,6 +253,27 @@ export function MemoryPage() {
     }
   }
 
+  async function onRebuild() {
+    if (
+      !window.confirm(
+        'Rebuild memories from your past chats? Auto-learned notes may be replaced. Things you pinned or confirmed stay.',
+      )
+    ) {
+      return
+    }
+    setRebuilding(true)
+    setError(null)
+    setNotice(null)
+    try {
+      const job = await memoryApi.rebuild()
+      setNotice(`Rebuild started (${job.status}). Refresh in a minute to see updates.`)
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setRebuilding(false)
+    }
+  }
+
   // ---- onboarding ---------------------------------------------------------------------------------------
   function openOnboarding() {
     setAnswers(ONBOARDING.map(() => ''))
@@ -337,14 +358,22 @@ export function MemoryPage() {
         </header>
         {profile === null ? (
           <p className="hint">{strings.a11y.loading}</p>
-        ) : profile.text.trim() ? (
-          <blockquote className="memory__snippet">{profile.text}</blockquote>
+        ) : (profile.profileSummary || profile.text).trim() ? (
+          <blockquote className="memory__snippet">{profile.profileSummary || profile.text}</blockquote>
         ) : (
           <p className="hint">{t.profileEmpty}</p>
         )}
         <div className="panel__actions">
           <button type="button" className="btn btn--sm btn--ghost" onClick={openOnboarding}>
             Answer a few questions
+          </button>
+          <button
+            type="button"
+            className="btn btn--sm btn--ghost"
+            disabled={rebuilding || enabled === false}
+            onClick={() => void onRebuild()}
+          >
+            {rebuilding ? 'Starting…' : 'Rebuild from chats'}
           </button>
         </div>
       </section>
@@ -420,7 +449,7 @@ export function MemoryPage() {
           <label className="field">
             <span className="field__label">Category</span>
             <select value={addCategory} onChange={(e) => setAddCategory(e.target.value as MemoryCategory)}>
-              {MEMORY_CATEGORIES.filter((c) => c.id !== 'OBSERVED_PATTERNS').map((c) => (
+              {MANUAL_ADD_CATEGORIES.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.label}
                 </option>
@@ -469,7 +498,8 @@ export function MemoryPage() {
                 <ul className="memory__list">
                   {items.map((m) => {
                     const tag = sourceTag(m)
-                    const needsConfirm = m.classification === 'INFERRED' && !m.userVerified
+                    const needsConfirm =
+                      m.sourceType === 'INFERRED' && (m.needsConfirmation || m.importance >= 0.75)
                     const busy = busyId === m.id || busyId === '*'
                     return (
                       <li key={m.id} className={`memory__item${m.pinned ? ' is-pinned' : ''}`}>
@@ -525,6 +555,9 @@ export function MemoryPage() {
                             </p>
                             <p className="memory__meta">
                               <span className={`tag${tag.warn ? ' tag--warn' : ''}`}>{tag.text}</span>
+                              {m.stability && m.stability !== 'EVOLVING' && (
+                                <span className="tag">{m.stability.toLowerCase()}</span>
+                              )}
                               {m.sensitivity === 'SENSITIVE' && <span className="tag tag--warn">Sensitive</span>}
                               <span className="memory__date">
                                 {m.lastUsedAt

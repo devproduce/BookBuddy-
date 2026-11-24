@@ -1,15 +1,25 @@
 import { API_BASE_URL, ApiError, api, tokenStore } from './client'
 
 export type MemoryCategory =
-  | 'ABOUT_ME'
-  | 'INTERESTS'
-  | 'PREFERENCES'
-  | 'GOALS'
-  | 'EXPERIENCES'
-  | 'OBSERVED_PATTERNS'
+  | 'PERSONAL_BACKGROUND'
+  | 'INTEREST'
+  | 'PREFERENCE'
+  | 'COMMUNICATION_STYLE'
+  | 'PERSONALITY_OBSERVATION'
+  | 'THINKING_PATTERN'
+  | 'GOAL'
+  | 'VALUE'
+  | 'EXPERIENCE'
+  | 'RECURRING_CHALLENGE'
   | 'EMOTIONAL_CONTEXT'
+  | 'RELATIONSHIP_CONTEXT'
+  | 'READING_PREFERENCE'
+  | 'LEARNING_PREFERENCE'
+  | 'ACHIEVEMENT'
+  | 'CURRENT_ACTIVITY'
 
-export type MemoryClassification = 'EXPLICIT' | 'INFERRED'
+export type MemorySourceType = 'EXPLICIT' | 'INFERRED' | 'USER_CONFIRMED'
+export type MemoryStability = 'STABLE' | 'EVOLVING' | 'TEMPORARY'
 export type MemorySensitivity = 'NORMAL' | 'SENSITIVE'
 export type MemoryStatus = 'ACTIVE' | 'ARCHIVED' | 'EXPIRED' | 'DELETED'
 
@@ -17,26 +27,41 @@ export interface Memory {
   id: string
   category: MemoryCategory
   content: string
-  classification: MemoryClassification
+  sourceType: MemorySourceType
   confidence: number
   importance: number
+  recurrence: number
+  stability: MemoryStability
   sensitivity: MemorySensitivity
-  userVerified: boolean
+  needsConfirmation: boolean
   pinned: boolean
   status: MemoryStatus
   supersededBy: string | null
-  sourceConversationId: string | null
+  sourceConversationIds: string[]
+  evidence: string[]
   expiresAt: string | null
   createdAt: string
   updatedAt: string
   lastUsedAt: string | null
 }
 
+export interface InteractionContext {
+  preferredTone: string
+  preferredDetailLevel: string
+  communicationStyle: string[]
+  emotionalSupportPreferences: string[]
+  advicePreferences: string[]
+  personalizationGuidelines: string[]
+  followUpQuestionPreference: string
+}
+
 export interface MemoryProfile {
   text: string
+  profileSummary: string
   estimatedTokens: number
   tokenBudget: number
   items: Memory[]
+  interactionContext: InteractionContext
 }
 
 export interface MemoryJob {
@@ -64,16 +89,31 @@ export const MEMORY_CATEGORIES: {
   label: string
   hint: string
 }[] = [
-  { id: 'ABOUT_ME', label: 'About me', hint: 'Who you are, in your own words.' },
-  { id: 'INTERESTS', label: 'Interests', hint: 'Genres, topics and authors you enjoy.' },
-  { id: 'PREFERENCES', label: 'Preferences', hint: 'How you like to read and be talked to.' },
-  { id: 'GOALS', label: 'Goals', hint: 'What you are aiming for.' },
-  { id: 'EXPERIENCES', label: 'Experiences', hint: 'Things you have read, done or been through.' },
-  { id: 'OBSERVED_PATTERNS', label: 'Observed patterns', hint: 'Things Book Buddy noticed. Confirm or remove them.' },
-  { id: 'EMOTIONAL_CONTEXT', label: 'Emotional context', hint: 'How you have been feeling lately. Fades after about two weeks.' },
+  { id: 'PERSONAL_BACKGROUND', label: 'Background', hint: 'Who you are, work, studies, life context.' },
+  { id: 'INTEREST', label: 'Interests', hint: 'Topics and passions you return to.' },
+  { id: 'READING_PREFERENCE', label: 'Reading', hint: 'Genres, authors, books, and reading style.' },
+  { id: 'LEARNING_PREFERENCE', label: 'Learning', hint: 'How you like to learn and understand things.' },
+  { id: 'PREFERENCE', label: 'Preferences', hint: 'How you like things done in general.' },
+  { id: 'COMMUNICATION_STYLE', label: 'Communication', hint: 'How you like Book Buddy to talk with you.' },
+  { id: 'GOAL', label: 'Goals', hint: 'What you are aiming for.' },
+  { id: 'VALUE', label: 'Values', hint: 'Principles that matter to you.' },
+  { id: 'EXPERIENCE', label: 'Experiences', hint: 'Meaningful things you have been through.' },
+  { id: 'ACHIEVEMENT', label: 'Achievements', hint: 'Wins worth remembering.' },
+  { id: 'RECURRING_CHALLENGE', label: 'Challenges', hint: 'Recurring difficulties you have shared.' },
+  { id: 'CURRENT_ACTIVITY', label: 'Current', hint: 'What you are working on right now.' },
+  { id: 'THINKING_PATTERN', label: 'Thinking', hint: 'How you tend to approach problems.' },
+  { id: 'PERSONALITY_OBSERVATION', label: 'Personality notes', hint: 'Cautious observations — confirm or remove.' },
+  { id: 'RELATIONSHIP_CONTEXT', label: 'People', hint: 'Important people you have mentioned.' },
+  { id: 'EMOTIONAL_CONTEXT', label: 'Emotional context', hint: 'How you have been feeling. Fades unless pinned.' },
 ]
 
 export const categoryLabel = (c: MemoryCategory) => MEMORY_CATEGORIES.find((x) => x.id === c)?.label ?? c
+
+export function sourceTag(m: Memory): { text: string; warn: boolean } {
+  if (m.sourceType === 'USER_CONFIRMED') return { text: 'Confirmed', warn: false }
+  if (m.sourceType === 'EXPLICIT') return { text: 'You said', warn: false }
+  return { text: 'Guess', warn: true }
+}
 
 export interface MemoryInput {
   category: MemoryCategory

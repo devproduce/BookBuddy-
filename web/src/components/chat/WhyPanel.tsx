@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { formatPages } from '../../api/books'
 import type { MessageCitation } from '../../api/chat'
-import { categoryLabel, memoryApi, type Memory } from '../../api/memory'
+import { categoryLabel, memoryApi, sourceTag, type Memory } from '../../api/memory'
 import { Alert } from '../Alert'
 import { errorMessage } from '../errorMessage'
 import type { UiMessage } from './types'
@@ -102,9 +102,7 @@ export function WhyPanel({
                 <p className="why__text">{m.content}</p>
                 <p className="why__meta">
                   <span className="tag">{categoryLabel(m.category)}</span>
-                  <span className={`tag ${m.classification === 'INFERRED' && !m.userVerified ? 'tag--warn' : ''}`}>
-                    {m.userVerified ? 'Confirmed' : m.classification === 'EXPLICIT' ? 'You said' : 'Guess'}
-                  </span>
+                  <span className={`tag ${sourceTag(m).warn ? 'tag--warn' : ''}`}>{sourceTag(m).text}</span>
                   {m.status !== 'ACTIVE' && <span className="tag">{m.status.toLowerCase()}</span>}
                   <button
                     type="button"
