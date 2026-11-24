@@ -3,7 +3,8 @@ package com.bookbuddy.memory;
 import com.bookbuddy.embedding.EmbeddingProvider;
 import com.bookbuddy.embedding.VectorMath;
 import com.bookbuddy.memory.MemoryDocument.Category;
-import com.bookbuddy.memory.MemoryDocument.Classification;
+import com.bookbuddy.memory.MemoryDocument.SourceType;
+import com.bookbuddy.memory.MemoryDocument.Stability;
 import com.bookbuddy.memory.MemoryDocument.Status;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -68,29 +69,59 @@ final class MemoryTestSupport {
         }
     }
 
-    static MemoryDocument memory(String id, Category category, String content, Classification classification) {
+    static MemoryDocument memory(String id, Category category, String content, SourceType sourceType) {
         MemoryDocument m = new MemoryDocument();
         m.setId(id);
         m.setUserId(USER);
         m.setCategory(category);
         m.setContent(content);
-        m.setClassification(classification);
-        m.setConfidence(classification == Classification.EXPLICIT ? 1.0 : 0.6);
+        m.setSourceType(sourceType);
+        m.setConfidence(sourceType == SourceType.EXPLICIT || sourceType == SourceType.USER_CONFIRMED ? 1.0 : 0.6);
         m.setImportance(0.5);
+        m.setRecurrence(1);
+        m.setStability(Stability.EVOLVING);
         m.setEmbedding(VectorMath.toList(FakeEmbeddings.BASE));
         m.setEmbeddingModel("fake");
         m.setStatus(Status.ACTIVE);
         m.setSourceMessageIds(new ArrayList<>());
+        m.setSourceConversationIds(new ArrayList<>());
+        m.setEvidence(new ArrayList<>());
         m.setCreatedAt(NOW.minusSeconds(3600));
         m.setUpdatedAt(NOW.minusSeconds(3600));
         return m;
     }
 
-    static MemoryCandidate candidate(Category category, String content, Classification classification) {
-        return new MemoryCandidate(category, content, classification, 0.9, 0.6, false, false, "", List.of());
+    static MemoryCandidate candidate(Category category, String content, SourceType sourceType) {
+        return new MemoryCandidate(
+                category,
+                content,
+                sourceType,
+                0.9,
+                0.6,
+                1,
+                Stability.EVOLVING,
+                false,
+                false,
+                false,
+                List.of(),
+                List.of(),
+                List.of());
     }
 
     static MemoryCandidate replacing(Category category, String content) {
-        return new MemoryCandidate(category, content, Classification.EXPLICIT, 0.9, 0.6, false, true, "", List.of());
+        return new MemoryCandidate(
+                category,
+                content,
+                SourceType.EXPLICIT,
+                0.9,
+                0.6,
+                1,
+                Stability.EVOLVING,
+                false,
+                true,
+                false,
+                List.of(),
+                List.of(),
+                List.of());
     }
 }

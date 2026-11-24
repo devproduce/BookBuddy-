@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.bookbuddy.memory.MemoryDocument.Category;
-import com.bookbuddy.memory.MemoryDocument.Classification;
+import com.bookbuddy.memory.MemoryDocument.SourceType;
 import com.bookbuddy.memory.MemoryDocument.Sensitivity;
 import com.bookbuddy.memory.MemoryDocument.Status;
 import com.bookbuddy.memory.MemoryMerger.Action;
@@ -42,8 +42,8 @@ class MemoryMergerTest {
         return merger.merge(c, USER, "conv1", FakeEmbeddings.at(similarityToExisting), working, NOW);
     }
 
-    private MemoryDocument existing(String id, Category category, String content, Classification classification) {
-        MemoryDocument m = memory(id, category, content, classification);
+    private MemoryDocument existing(String id, Category category, String content, SourceType SourceType) {
+        MemoryDocument m = memory(id, category, content, SourceType);
         working.add(m);
         return m;
     }
@@ -54,7 +54,7 @@ class MemoryMergerTest {
 
     @Test
     void addsWhenNothingIsKnownYet() {
-        Outcome o = merge(candidate(Category.INTERESTS, "Loves cosy mysteries", Classification.EXPLICIT), 1.0);
+        Outcome o = merge(candidate(Category.INTEREST, "Loves cosy mysteries", SourceType.EXPLICIT), 1.0);
 
         assertEquals(Action.ADD, o.action());
         assertNotNull(o.created());
@@ -62,7 +62,7 @@ class MemoryMergerTest {
         MemoryDocument m = o.created();
         assertEquals(USER, m.getUserId());
         assertEquals(Status.ACTIVE, m.getStatus());
-        assertEquals("conv1", m.getSourceConversationId());
+        assertEquals("conv1", m.getSourceConversationIds().get(0));
         assertEquals("fake", m.getEmbeddingModel());
         assertFalse(m.getEmbedding().isEmpty());
         assertNotNull(m.getId(), "id is generated up front so SUPERSEDE can link old -> new");
@@ -70,9 +70,9 @@ class MemoryMergerTest {
 
     @Test
     void addsWhenTheClosestMemoryIsOnlyLooselyRelated() {
-        existing("m1", Category.INTERESTS, "Likes fantasy", Classification.EXPLICIT);
+        existing("m1", Category.INTEREST, "Likes fantasy", SourceType.EXPLICIT);
 
-        Outcome o = merge(candidate(Category.INTERESTS, "Likes sailing", Classification.EXPLICIT), 0.5);
+        Outcome o = merge(candidate(Category.INTEREST, "Likes sailing", SourceType.EXPLICIT), 0.5);
 
         assertEquals(Action.ADD, o.action());
         assertEquals(2, working.size());
@@ -80,12 +80,12 @@ class MemoryMergerTest {
 
     @Test
     void sameWordsInADifferentCategoryAreAddedUnlessNearlyIdentical() {
-        existing("m1", Category.INTERESTS, "Likes long novels", Classification.EXPLICIT);
+        existing("m1", Category.INTEREST, "Likes long novels", SourceType.EXPLICIT);
 
         assertEquals(Action.ADD,
-                merge(candidate(Category.PREFERENCES, "Prefers long novels", Classification.EXPLICIT), 0.8).action());
+                merge(candidate(Category.PREFERENCE, "Prefers long novels", SourceType.EXPLICIT), 0.8).action());
         assertEquals(Action.IGNORE,
-                merge(candidate(Category.PREFERENCES, "Likes long novels!", Classification.EXPLICIT), 0.97).action());
+                merge(candidate(Category.PREFERENCE, "Likes long novels!", SourceType.EXPLICIT), 0.97).action());
     }
 
     // ---------------------------------------------------------------------------------------------------------
@@ -94,9 +94,9 @@ class MemoryMergerTest {
 
     @Test
     void ignoresADuplicateAndChangesNothing() {
-        MemoryDocument m = existing("m1", Category.INTERESTS, "Loves cosy mysteries", Classification.EXPLICIT);
+        MemoryDocument m = existing("m1", Category.INTEREST, "Loves cosy mysteries", SourceType.EXPLICIT);
 
-        Outcome o = merge(candidate(Category.INTERESTS, "Really enjoys cosy mystery novels", Classification.EXPLICIT), 0.95);
+        Outcome o = merge(candidate(Category.INTEREST, "Really enjoys cosy mystery novels", SourceType.EXPLICIT), 0.95);
 
         assertEquals(Action.IGNORE, o.action());
         assertNull(o.created());
@@ -107,9 +107,9 @@ class MemoryMergerTest {
 
     @Test
     void updatesWhenTheNewStatementContainsTheOldOne() {
-        MemoryDocument m = existing("m1", Category.GOALS, "Wants to read more", Classification.EXPLICIT);
+        MemoryDocument m = existing("m1", Category.GOAL, "Wants to read more", SourceType.EXPLICIT);
 
-        Outcome o = merge(candidate(Category.GOALS, "Wants to read more, aiming for 30 books this year", Classification.EXPLICIT), 0.8);
+        Outcome o = merge(candidate(Category.GOAL, "Wants to read more, aiming for 30 books this year", SourceType.EXPLICIT), 0.8);
 
         assertEquals(Action.UPDATE, o.action());
         assertSame(m, o.changed());
@@ -119,10 +119,9 @@ class MemoryMergerTest {
 
     @Test
     void mergesTwoRelatedStatementsIntoOne() {
-        MemoryDocument m = existing("m1", Category.INTERESTS, "Likes fantasy", Classification.EXPLICIT);
+        MemoryDocument m = existing("m1", Category.INTEREST, "Likes fantasy", SourceType.EXPLICIT);
         m.setSourceMessageIds(new ArrayList<>(List.of("a")));
-        MemoryCandidate c = new MemoryCandidate(Category.INTERESTS, "Enjoys epic sagas", Classification.EXPLICIT,
-                0.9, 0.8, false, false, "", List.of("a", "b"));
+        MemoryCandidate c = new MemoryCandidate(Category.INTEREST, "Enjoys epic sagas", SourceType.EXPLICIT, 0.9, 0.8, 1, com.bookbuddy.memory.MemoryDocument.Stability.EVOLVING, false, false, false, "".isEmpty() ? List.of() : List.of(""), List.of("a", "b"), List.of());
 
         Outcome o = merge(c, 0.8);
 
@@ -139,9 +138,9 @@ class MemoryMergerTest {
 
     @Test
     void supersedesWhenTheUserChangesTheirMind() {
-        MemoryDocument old = existing("m1", Category.PREFERENCES, "Prefers audiobooks", Classification.EXPLICIT);
+        MemoryDocument old = existing("m1", Category.PREFERENCE, "Prefers audiobooks", SourceType.EXPLICIT);
 
-        Outcome o = merge(replacing(Category.PREFERENCES, "No longer likes audiobooks"), 0.8);
+        Outcome o = merge(replacing(Category.PREFERENCE, "No longer likes audiobooks"), 0.8);
 
         assertEquals(Action.SUPERSEDE, o.action());
         assertSame(old, o.superseded());
@@ -153,9 +152,9 @@ class MemoryMergerTest {
 
     @Test
     void aCorrectionIsNotMistakenForADuplicateJustBecauseItEmbedsClose() {
-        existing("m1", Category.PREFERENCES, "Likes audiobooks", Classification.EXPLICIT);
+        existing("m1", Category.PREFERENCE, "Likes audiobooks", SourceType.EXPLICIT);
 
-        Outcome o = merge(replacing(Category.PREFERENCES, "Does not like audiobooks"), 0.96);
+        Outcome o = merge(replacing(Category.PREFERENCE, "Does not like audiobooks"), 0.96);
 
         assertEquals(Action.SUPERSEDE, o.action());
     }
@@ -166,34 +165,33 @@ class MemoryMergerTest {
 
     @Test
     void anInferenceNeverOverwritesOrMergesIntoWhatTheUserStated() {
-        MemoryDocument stated = existing("m1", Category.INTERESTS, "Loves fantasy", Classification.EXPLICIT);
+        MemoryDocument stated = existing("m1", Category.INTEREST, "Loves fantasy", SourceType.EXPLICIT);
 
-        Outcome o = merge(candidate(Category.INTERESTS, "Seems to enjoy grimdark settings", Classification.INFERRED), 0.8);
+        Outcome o = merge(candidate(Category.INTEREST, "Seems to enjoy grimdark settings", SourceType.INFERRED), 0.8);
 
         assertEquals(Action.ADD, o.action(), "kept as its own, clearly inferred memory");
-        assertEquals(Classification.INFERRED, o.created().getClassification());
+        assertEquals(SourceType.INFERRED, o.created().getSourceType());
         assertEquals("Loves fantasy", stated.getContent());
-        assertEquals(Classification.EXPLICIT, stated.getClassification());
+        assertEquals(SourceType.EXPLICIT, stated.getSourceType());
         assertEquals(1.0, stated.getConfidence(), 1e-9);
     }
 
     @Test
     void anInferenceThatRepeatsAStatedMemoryIsIgnoredRatherThanCountedAsConfirmation() {
-        MemoryDocument stated = existing("m1", Category.INTERESTS, "Loves fantasy", Classification.EXPLICIT);
+        MemoryDocument stated = existing("m1", Category.INTEREST, "Loves fantasy", SourceType.EXPLICIT);
 
-        Outcome o = merge(candidate(Category.INTERESTS, "Probably likes fantasy", Classification.INFERRED), 0.95);
+        Outcome o = merge(candidate(Category.INTEREST, "Probably likes fantasy", SourceType.INFERRED), 0.95);
 
         assertEquals(Action.IGNORE, o.action());
-        assertFalse(stated.isUserVerified());
-        assertEquals(Classification.EXPLICIT, stated.getClassification());
+        assertFalse(stated.isUserConfirmed());
+        assertEquals(SourceType.EXPLICIT, stated.getSourceType());
     }
 
     @Test
     void anInferenceNeverSupersedesAVerifiedMemory() {
-        MemoryDocument verified = existing("m1", Category.PREFERENCES, "Prefers paperbacks", Classification.INFERRED);
-        verified.setUserVerified(true);
-        MemoryCandidate c = new MemoryCandidate(Category.PREFERENCES, "Seems to prefer e-books", Classification.INFERRED,
-                0.6, 0.5, false, true, "", List.of());
+        MemoryDocument verified = existing("m1", Category.PREFERENCE, "Prefers paperbacks", SourceType.INFERRED);
+        verified.setSourceType(SourceType.USER_CONFIRMED);
+        MemoryCandidate c = new MemoryCandidate(Category.PREFERENCE, "Seems to prefer e-books", SourceType.INFERRED, 0.6, 0.5, 1, com.bookbuddy.memory.MemoryDocument.Stability.EVOLVING, false, true, false, "".isEmpty() ? List.of() : List.of(""), List.of(), List.of());
 
         Outcome o = merge(c, 0.8);
 
@@ -207,35 +205,36 @@ class MemoryMergerTest {
 
     @Test
     void anExplicitStatementReplacesAnUnconfirmedInference() {
-        MemoryDocument guess = existing("m1", Category.INTERESTS, "Probably likes thrillers", Classification.INFERRED);
+        MemoryDocument guess = existing("m1", Category.INTEREST, "Probably likes thrillers", SourceType.INFERRED);
 
-        Outcome o = merge(candidate(Category.INTERESTS, "Loves thrillers", Classification.EXPLICIT), 0.85);
+        Outcome o = merge(candidate(Category.INTEREST, "Loves thrillers", SourceType.EXPLICIT), 0.85);
 
         assertEquals(Action.UPDATE, o.action());
         assertSame(guess, o.changed());
         assertEquals("Loves thrillers", guess.getContent());
-        assertEquals(Classification.EXPLICIT, guess.getClassification());
+        assertEquals(SourceType.EXPLICIT, guess.getSourceType());
     }
 
     @Test
     void mergedInferencesStayInferredAndCappedAtSeventyPercent() {
-        MemoryDocument m = existing("m1", Category.OBSERVED_PATTERNS, "Often reads late at night", Classification.INFERRED);
+        MemoryDocument m = existing("m1", Category.PERSONALITY_OBSERVATION, "Often reads late at night", SourceType.INFERRED);
         m.setConfidence(0.6);
-        MemoryCandidate c = new MemoryCandidate(Category.OBSERVED_PATTERNS, "Tends to ask for short chapters",
-                Classification.INFERRED, 0.99, 0.5, false, false, "", List.of());
+        MemoryCandidate c = candidate(Category.PERSONALITY_OBSERVATION, "Tends to ask for short chapters", SourceType.INFERRED);
+        c = new MemoryCandidate(
+                c.category(), c.content(), c.sourceType(), 0.99, 0.5, 1, c.stability(), false, false, false,
+                List.of(), List.of(), List.of());
 
         Outcome o = merge(c, 0.8);
 
         assertEquals(Action.MERGE, o.action());
-        assertEquals(Classification.INFERRED, m.getClassification());
-        assertFalse(m.isUserVerified());
+        assertEquals(SourceType.INFERRED, m.getSourceType());
+        assertFalse(m.isUserConfirmed());
         assertEquals(MemoryPolicy.INFERRED_CONFIDENCE_CAP, m.getConfidence(), 1e-9);
     }
 
     @Test
     void newInferredMemoriesAreCappedEvenIfTheCandidateSlippedThroughHigher() {
-        MemoryCandidate c = new MemoryCandidate(Category.OBSERVED_PATTERNS, "Reads in bursts", Classification.INFERRED,
-                0.95, 0.5, false, false, "", List.of());
+        MemoryCandidate c = new MemoryCandidate(Category.PERSONALITY_OBSERVATION, "Reads in bursts", SourceType.INFERRED, 0.95, 0.5, 1, com.bookbuddy.memory.MemoryDocument.Stability.EVOLVING, false, false, false, "".isEmpty() ? List.of() : List.of(""), List.of(), List.of());
 
         Outcome o = merge(c, 1.0);
 
@@ -248,26 +247,26 @@ class MemoryMergerTest {
 
     @Test
     void archivedExpiredAndSupersededMemoriesAreNotMergeTargets() {
-        MemoryDocument archived = existing("m1", Category.INTERESTS, "Likes poetry", Classification.EXPLICIT);
+        MemoryDocument archived = existing("m1", Category.INTEREST, "Likes poetry", SourceType.EXPLICIT);
         archived.setStatus(Status.ARCHIVED);
-        MemoryDocument expired = existing("m2", Category.INTERESTS, "Likes essays", Classification.EXPLICIT);
+        MemoryDocument expired = existing("m2", Category.INTEREST, "Likes essays", SourceType.EXPLICIT);
         expired.setExpiresAt(NOW.minusSeconds(60));
-        MemoryDocument replaced = existing("m3", Category.INTERESTS, "Likes plays", Classification.EXPLICIT);
+        MemoryDocument replaced = existing("m3", Category.INTEREST, "Likes plays", SourceType.EXPLICIT);
         replaced.setSupersededBy("m9");
 
-        Outcome o = merge(candidate(Category.INTERESTS, "Likes poetry a lot", Classification.EXPLICIT), 0.99);
+        Outcome o = merge(candidate(Category.INTEREST, "Likes poetry a lot", SourceType.EXPLICIT), 0.99);
 
         assertEquals(Action.ADD, o.action());
     }
 
     @Test
     void emotionalContextExpiresInFourteenDaysAndIsRenewedWhenItComesUpAgain() {
-        Outcome added = merge(candidate(Category.EMOTIONAL_CONTEXT, "Feeling stressed about exams", Classification.EXPLICIT), 1.0);
+        Outcome added = merge(candidate(Category.EMOTIONAL_CONTEXT, "Feeling stressed about exams", SourceType.EXPLICIT), 1.0);
         assertEquals(NOW.plus(Duration.ofDays(14)), added.created().getExpiresAt());
 
         MemoryDocument m = added.created();
         m.setExpiresAt(NOW.plus(Duration.ofDays(1)));
-        MemoryCandidate again = candidate(Category.EMOTIONAL_CONTEXT, "Feeling stressed about exams, still", Classification.EXPLICIT);
+        MemoryCandidate again = candidate(Category.EMOTIONAL_CONTEXT, "Feeling stressed about exams, still", SourceType.EXPLICIT);
         Outcome o = merger.merge(again, USER, "conv2", FakeEmbeddings.at(0.8), working, NOW.plusSeconds(60));
 
         assertEquals(Action.UPDATE, o.action());
@@ -276,14 +275,13 @@ class MemoryMergerTest {
 
     @Test
     void otherCategoriesNeverGetAnExpiry() {
-        Outcome o = merge(candidate(Category.GOALS, "Wants to write a novel", Classification.EXPLICIT), 1.0);
+        Outcome o = merge(candidate(Category.GOAL, "Wants to write a novel", SourceType.EXPLICIT), 1.0);
         assertNull(o.created().getExpiresAt());
     }
 
     @Test
     void sensitiveCandidatesAreFlaggedOnTheStoredMemory() {
-        MemoryCandidate c = new MemoryCandidate(Category.ABOUT_ME, "Lives with anxiety", Classification.EXPLICIT,
-                0.9, 0.8, true, false, "I live with anxiety", List.of());
+        MemoryCandidate c = new MemoryCandidate(Category.PERSONAL_BACKGROUND, "Lives with anxiety", SourceType.EXPLICIT, 0.9, 0.8, 1, com.bookbuddy.memory.MemoryDocument.Stability.EVOLVING, true, false, false, "I live with anxiety".isEmpty() ? List.of() : List.of("I live with anxiety"), List.of(), List.of());
 
         Outcome o = merge(c, 1.0);
 
@@ -293,8 +291,8 @@ class MemoryMergerTest {
     @Test
     void laterCandidatesInTheSameRunSeeEarlierOnes() {
         embeddings.put("Loves cosy mysteries", FakeEmbeddings.at(1.0));
-        Outcome first = merge(candidate(Category.INTERESTS, "Loves cosy mysteries", Classification.EXPLICIT), 1.0);
-        Outcome second = merge(candidate(Category.INTERESTS, "Adores cosy mysteries", Classification.EXPLICIT), 0.95);
+        Outcome first = merge(candidate(Category.INTEREST, "Loves cosy mysteries", SourceType.EXPLICIT), 1.0);
+        Outcome second = merge(candidate(Category.INTEREST, "Adores cosy mysteries", SourceType.EXPLICIT), 0.95);
 
         assertEquals(Action.ADD, first.action());
         assertEquals(Action.IGNORE, second.action());
@@ -304,10 +302,10 @@ class MemoryMergerTest {
     @Test
     void lexicalEmbeddingsUseLowerThresholds() {
         embeddings.semantic = false;
-        existing("m1", Category.INTERESTS, "Loves cosy mysteries", Classification.EXPLICIT);
+        existing("m1", Category.INTEREST, "Loves cosy mysteries", SourceType.EXPLICIT);
 
         // 0.8 is only a "merge" for a semantic model, but a lexical (hash) model scores true duplicates lower
-        Outcome o = merge(candidate(Category.INTERESTS, "Loves cosy mystery books", Classification.EXPLICIT), 0.8);
+        Outcome o = merge(candidate(Category.INTEREST, "Loves cosy mystery books", SourceType.EXPLICIT), 0.8);
 
         assertEquals(Action.IGNORE, o.action());
     }

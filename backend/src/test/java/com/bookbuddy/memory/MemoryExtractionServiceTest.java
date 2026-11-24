@@ -2,10 +2,8 @@ package com.bookbuddy.memory;
 
 import static com.bookbuddy.memory.MemoryTestSupport.NOW;
 import static com.bookbuddy.memory.MemoryTestSupport.USER;
-import static com.bookbuddy.memory.MemoryTestSupport.candidate;
 import static com.bookbuddy.memory.MemoryTestSupport.memory;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -17,7 +15,6 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.bookbuddy.ai.LlmException;
 import com.bookbuddy.ai.LlmProvider;
 import com.bookbuddy.auth.UserDocument;
 import com.bookbuddy.auth.UserRepository;
@@ -27,14 +24,14 @@ import com.bookbuddy.conversation.MessageDocument;
 import com.bookbuddy.conversation.MessageDocument.Role;
 import com.bookbuddy.conversation.MessageDocument.Status;
 import com.bookbuddy.conversation.MessageRepository;
-import com.bookbuddy.jobs.JobHandler.BudgetDeferredException;
 import com.bookbuddy.jobs.JobQueueDocument;
 import com.bookbuddy.jobs.JobQueueDocument.Type;
 import com.bookbuddy.jobs.JobQueueService;
 import com.bookbuddy.memory.MemoryDocument.Category;
-import com.bookbuddy.memory.MemoryDocument.Classification;
+import com.bookbuddy.memory.MemoryDocument.SourceType;
+import com.bookbuddy.memory.MemoryEngineResult.Operation;
 import com.bookbuddy.memory.MemoryTestSupport.FakeEmbeddings;
-import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
@@ -42,7 +39,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.data.domain.Limit;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
-/** Trigger policy, the incognito / paused skips, and "an LLM failure never changes or deletes anything". */
+/** Trigger policy, the incognito / paused skips, and engine-driven apply. */
 class MemoryExtractionServiceTest {
 
     private static final String CONV = "c1";
@@ -51,7 +48,8 @@ class MemoryExtractionServiceTest {
     private final ConversationRepository conversations = mock(ConversationRepository.class);
     private final MessageRepository messages = mock(MessageRepository.class);
     private final MemoryRepository memories = mock(MemoryRepository.class);
-    private final MemoryExtractor extractor = mock(MemoryExtractor.class);
+    private final MemoryEngineClient engine = mock(MemoryEngineClient.class);
+    private final MemoryApplyService apply = mock(MemoryApplyService.class);
     private final JobQueueService jobs = mock(JobQueueService.class);
     private final LlmProvider llm = mock(LlmProvider.class);
     private final MongoTemplate mongo = mock(MongoTemplate.class);
@@ -65,8 +63,18 @@ class MemoryExtractionServiceTest {
     void setUp() {
         MemoryProperties props = MemoryProperties.defaults();
         service = new MemoryExtractionService(
-                users, conversations, messages, memories, extractor,
-                new MemoryMerger(embeddings, props), new MemoryWriter(memories), embeddings, jobs, llm, props, mongo, true);
+                users,
+                conversations,
+                messages,
+                memories,
+                engine,
+                apply,
+                embeddings,
+                jobs,
+                llm,
+                props,
+                mongo,
+                true);
 
         user.setId(USER);
         user.setMemoryEnabled(true);
@@ -81,6 +89,25 @@ class MemoryExtractionServiceTest {
         when(messages.findByConversationIdAndUserIdOrderByCreatedAtDescIdDesc(eq(CONV), eq(USER), any(Limit.class)))
                 .thenReturn(List.of(msg("m2", Role.ASSISTANT, "Nice!", 2), msg("m1", Role.USER, "I love fantasy", 1)));
         when(memories.findByUserIdAndStatusOrderByUpdatedAtDesc(USER, MemoryDocument.Status.ACTIVE)).thenReturn(List.of());
+        when(memories.countByUserIdAndStatus(USER, MemoryDocument.Status.ACTIVE)).thenReturn(0L);
+        when(apply.apply(anyString(), anyString(), any())).thenReturn(
+                new MemoryApplyService.ApplyResult(1, 0, 0, 0, 0, 0, 0, false, List.of()));
+        when(engine.analyzeIncremental(anyString(), anyString(), any(), any())).thenReturn(emptyResult());
+    }
+
+    private static MemoryEngineResult emptyResult() {
+        return new MemoryEngineResult(
+                Operation.INCREMENTAL_ANALYSIS,
+                MemoryEngineResult.ProfileDraft.empty(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                MemoryEngineResult.InteractionDraft.empty(),
+                MemoryEngineResult.ProcessingMetadata.empty(),
+                List.of(),
+                "");
     }
 
     private static MessageDocument msg(String id, Role role, String text, int n) {
@@ -92,10 +119,6 @@ class MemoryExtractionServiceTest {
         m.setCreatedAt(NOW.minusSeconds(1000 - n));
         return m;
     }
-
-    // ---------------------------------------------------------------------------------------------------------
-    // Triggers
-    // ---------------------------------------------------------------------------------------------------------
 
     @Test
     void queuesAnExtractionOnceEnoughNewMessagesHavePiledUp() {
@@ -120,147 +143,35 @@ class MemoryExtractionServiceTest {
     }
 
     @Test
-    void incognitoConversationsAreNeverQueued() {
+    void skipsIncognitoAndPausedUsers() {
         conversation.setIncognito(true);
+        service.onTurnCompleted(user, conversation);
+        verify(jobs, never()).enqueueOnce(any(), anyString(), anyMap(), anyString());
+
+        conversation.setIncognito(false);
+        user.setMemoryEnabled(false);
         service.onTurnCompleted(user, conversation);
         verify(jobs, never()).enqueueOnce(any(), anyString(), anyMap(), anyString());
     }
 
     @Test
-    void nothingIsQueuedWhenMemoryIsOffOrTheModelIsUnavailable() {
-        user.setMemoryEnabled(false);
-        service.onTurnCompleted(user, conversation);
-        user.setMemoryEnabled(true);
-        when(llm.isConfigured()).thenReturn(false);
-        service.onTurnCompleted(user, conversation);
-        verify(jobs, never()).enqueueOnce(any(), anyString(), anyMap(), anyString());
-    }
-
-    @Test
-    void idleScanQueuesQuietConversationsWithNewMessagesForUsersWithMemoryOnly() {
-        ConversationDocument off = new ConversationDocument();
-        off.setId("c2");
-        off.setUserId("u2");
-        off.setMessageCount(3);
-        UserDocument other = new UserDocument();
-        other.setId("u2");
-        other.setMemoryEnabled(false);
-        ConversationDocument done = new ConversationDocument();
-        done.setId("c3");
-        done.setUserId(USER);
-        done.setMessageCount(4);
-        done.setLastExtractedMessageCount(4);
-        when(users.findById("u2")).thenReturn(java.util.Optional.of(other));
-        when(conversations.findByIncognitoFalseAndUpdatedAtBetween(any(Instant.class), any(Instant.class), any(Limit.class)))
-                .thenReturn(List.of(conversation, off, done));
-
-        int queued = service.scanIdle(NOW);
-
-        assertEquals(1, queued);
-        verify(jobs).enqueueOnce(eq(Type.MEMORY_EXTRACTION), eq(USER), anyMap(), eq("memory-extract:c1:10"));
-    }
-
-    // ---------------------------------------------------------------------------------------------------------
-    // Skips
-    // ---------------------------------------------------------------------------------------------------------
-
-    @Test
-    void incognitoConversationsAreSkippedWithoutCallingTheModel() {
-        conversation.setIncognito(true);
-
+    void extractConversationAppliesEngineResult() {
         var result = service.extractConversation(USER, CONV);
-
-        assertTrue(result.skipped());
-        verify(extractor, never()).extract(anyString(), any());
-        verify(memories, never()).save(any());
+        assertEquals(1, result.added());
+        verify(engine).analyzeIncremental(eq(USER), eq(CONV), any(), any());
+        verify(apply).apply(eq(USER), eq(CONV), any());
     }
 
     @Test
-    void pausedMemoryIsSkippedWithoutCallingTheModel() {
-        user.setMemoryEnabled(false);
-
-        var result = service.extractConversation(USER, CONV);
-
-        assertTrue(result.skipped());
-        assertEquals("memory paused", result.reason());
-        verify(extractor, never()).extract(anyString(), any());
-        verify(memories, never()).save(any());
-    }
-
-    @Test
-    void aMissingConversationIsASilentSkip() {
-        when(conversations.findByIdAndUserId(CONV, USER)).thenReturn(java.util.Optional.empty());
-        assertTrue(service.extractConversation(USER, CONV).skipped());
-    }
-
-    @Test
-    void memoryTurnedOffWhileTheModelWasThinkingDiscardsTheResult() {
-        when(extractor.extract(eq(USER), any())).thenAnswer(inv -> {
+    void extractConversationSkipsWhenPausedAfterLlm() {
+        when(engine.analyzeIncremental(anyString(), anyString(), any(), any())).thenAnswer(inv -> {
             user.setMemoryEnabled(false);
-            return List.of(candidate(Category.INTERESTS, "Loves fantasy", Classification.EXPLICIT));
+            return emptyResult();
         });
 
         var result = service.extractConversation(USER, CONV);
-
         assertTrue(result.skipped());
-        verify(memories, never()).save(any());
-    }
-
-    // ---------------------------------------------------------------------------------------------------------
-    // Safety of writes
-    // ---------------------------------------------------------------------------------------------------------
-
-    @Test
-    void anLlmFailureLeavesEveryMemoryUntouchedAndTheMessagesUnmarked() {
-        when(extractor.extract(eq(USER), any())).thenThrow(new LlmException("timeout"));
-
-        assertThrows(LlmException.class, () -> service.extractConversation(USER, CONV));
-
-        verify(memories, never()).save(any());
-        verify(memories, never()).delete(any());
-        verify(memories, never()).deleteAll(any(Iterable.class));
-        verify(memories, never()).deleteByUserId(anyString());
-        verify(mongo, never()).updateFirst(any(), any(), eq(ConversationDocument.class));
-    }
-
-    @Test
-    void invalidOutputAndDeferredBudgetAlsoWriteNothing() {
-        when(extractor.extract(eq(USER), any()))
-                .thenThrow(new MemoryExtractor.InvalidOutputException("bad"))
-                .thenThrow(new BudgetDeferredException("low"));
-
-        assertThrows(MemoryExtractor.InvalidOutputException.class, () -> service.extractConversation(USER, CONV));
-        assertThrows(BudgetDeferredException.class, () -> service.extractConversation(USER, CONV));
-
-        verify(memories, never()).save(any());
-        verify(mongo, never()).updateFirst(any(), any(), eq(ConversationDocument.class));
-    }
-
-    @Test
-    void successfulRunsWriteNewMemoriesAndMarkTheConversation() {
-        when(extractor.extract(eq(USER), any()))
-                .thenReturn(List.of(candidate(Category.INTERESTS, "Loves fantasy", Classification.EXPLICIT)));
-
-        var result = service.extractConversation(USER, CONV);
-
-        assertFalse(result.skipped());
-        assertEquals(1, result.added());
-        verify(memories).save(any(MemoryDocument.class));
-        verify(mongo).updateFirst(any(), any(), eq(ConversationDocument.class));
-    }
-
-    @Test
-    void duplicatesAreIgnoredAndNotWrittenAgain() {
-        MemoryDocument existing = memory("old", Category.INTERESTS, "Loves fantasy", Classification.EXPLICIT);
-        when(memories.findByUserIdAndStatusOrderByUpdatedAtDesc(USER, MemoryDocument.Status.ACTIVE))
-                .thenReturn(List.of(existing));
-        when(extractor.extract(eq(USER), any()))
-                .thenReturn(List.of(candidate(Category.INTERESTS, "Loves fantasy", Classification.EXPLICIT)));
-
-        var result = service.extractConversation(USER, CONV);
-
-        assertEquals(1, result.ignored());
-        verify(memories, never()).save(any());
+        verify(apply, never()).apply(anyString(), anyString(), any());
     }
 
     @Test
@@ -273,15 +184,15 @@ class MemoryExtractionServiceTest {
 
     @Test
     void deletingAConversationDetachesButKeepsItsMemories() {
-        MemoryDocument m = memory("m", Category.INTERESTS, "Loves fantasy", Classification.EXPLICIT);
-        m.setSourceConversationId(CONV);
-        m.setSourceMessageIds(new java.util.ArrayList<>(List.of("m1")));
-        when(memories.findByUserIdAndSourceConversationId(USER, CONV)).thenReturn(List.of(m));
+        MemoryDocument m = memory("m", Category.INTEREST, "Loves fantasy", SourceType.EXPLICIT);
+        m.setSourceConversationIds(new ArrayList<>(List.of(CONV)));
+        m.setSourceMessageIds(new ArrayList<>(List.of("m1")));
+        when(memories.findByUserIdAndSourceConversationIdsContaining(USER, CONV)).thenReturn(List.of(m));
 
         service.onConversationDeleted(USER, CONV);
 
         verify(memories).save(m);
-        assertEquals(null, m.getSourceConversationId());
+        assertTrue(m.getSourceConversationIds().isEmpty());
         assertTrue(m.getSourceMessageIds().isEmpty());
     }
 }

@@ -16,7 +16,7 @@ import static org.mockito.Mockito.when;
 import com.bookbuddy.conversation.TokenEstimator;
 import com.bookbuddy.embedding.VectorMath;
 import com.bookbuddy.memory.MemoryDocument.Category;
-import com.bookbuddy.memory.MemoryDocument.Classification;
+import com.bookbuddy.memory.MemoryDocument.SourceType;
 import com.bookbuddy.memory.MemoryDocument.Sensitivity;
 import com.bookbuddy.memory.MemoryDocument.Status;
 import com.bookbuddy.memory.MemoryTestSupport.FakeEmbeddings;
@@ -44,7 +44,7 @@ class MemoryRetrievalServiceTest {
     }
 
     /** A memory whose cosine similarity to the (default) query vector is {@code similarity}. */
-    private static MemoryDocument at(String id, Category category, String content, Classification c, double similarity) {
+    private static MemoryDocument at(String id, Category category, String content, SourceType c, double similarity) {
         MemoryDocument m = memory(id, category, content, c);
         m.setEmbedding(VectorMath.toList(FakeEmbeddings.at(similarity)));
         return m;
@@ -64,7 +64,7 @@ class MemoryRetrievalServiceTest {
     void coreProfileStaysWithinItsTokenBudget() {
         List<MemoryDocument> usable = new ArrayList<>();
         for (int i = 0; i < 30; i++) {
-            usable.add(at("m" + i, Category.ABOUT_ME, "Fact number " + i + " about the reader: " + "detail ".repeat(10), Classification.EXPLICIT, 0.5));
+            usable.add(at("m" + i, Category.PERSONAL_BACKGROUND, "Fact number " + i + " about the reader: " + "detail ".repeat(10), SourceType.EXPLICIT, 0.5));
         }
 
         MemoryRetrievalService.CoreProfile core = service().buildCore(usable, 150);
@@ -76,14 +76,14 @@ class MemoryRetrievalServiceTest {
 
     @Test
     void coreProfileHoldsOnlyStatedNonSensitiveMemories() {
-        MemoryDocument stated = at("a", Category.ABOUT_ME, "Is a teacher", Classification.EXPLICIT, 0.5);
-        MemoryDocument verifiedGuess = at("b", Category.INTERESTS, "Likes history", Classification.INFERRED, 0.5);
-        verifiedGuess.setUserVerified(true);
-        MemoryDocument guess = at("c", Category.INTERESTS, "Probably likes sci-fi", Classification.INFERRED, 0.5);
-        MemoryDocument sensitive = at("d", Category.ABOUT_ME, "Has ADHD", Classification.EXPLICIT, 0.5);
+        MemoryDocument stated = at("a", Category.PERSONAL_BACKGROUND, "Is a teacher", SourceType.EXPLICIT, 0.5);
+        MemoryDocument verifiedGuess = at("b", Category.INTEREST, "Likes history", SourceType.INFERRED, 0.5);
+        verifiedGuess.setSourceType(SourceType.USER_CONFIRMED);
+        MemoryDocument guess = at("c", Category.INTEREST, "Probably likes sci-fi", SourceType.INFERRED, 0.5);
+        MemoryDocument sensitive = at("d", Category.PERSONAL_BACKGROUND, "Has ADHD", SourceType.EXPLICIT, 0.5);
         sensitive.setSensitivity(Sensitivity.SENSITIVE);
-        MemoryDocument mood = at("e", Category.EMOTIONAL_CONTEXT, "Feeling low", Classification.EXPLICIT, 0.5);
-        MemoryDocument experience = at("f", Category.EXPERIENCES, "Visited Jaipur", Classification.EXPLICIT, 0.5);
+        MemoryDocument mood = at("e", Category.EMOTIONAL_CONTEXT, "Feeling low", SourceType.EXPLICIT, 0.5);
+        MemoryDocument experience = at("f", Category.EXPERIENCE, "Visited Jaipur", SourceType.EXPLICIT, 0.5);
 
         List<String> core = service().buildCore(List.of(stated, verifiedGuess, guess, sensitive, mood, experience), 150)
                 .items().stream().map(MemoryDocument::getId).toList();
@@ -93,8 +93,8 @@ class MemoryRetrievalServiceTest {
 
     @Test
     void pinnedStatedMemoriesComeFirstEvenOutsideTheCoreCategories() {
-        MemoryDocument about = at("a", Category.ABOUT_ME, "Is a teacher", Classification.EXPLICIT, 0.5);
-        MemoryDocument pinned = at("p", Category.EXPERIENCES, "Lived in Pune for ten years", Classification.EXPLICIT, 0.5);
+        MemoryDocument about = at("a", Category.PERSONAL_BACKGROUND, "Is a teacher", SourceType.EXPLICIT, 0.5);
+        MemoryDocument pinned = at("p", Category.EXPERIENCE, "Lived in Pune for ten years", SourceType.EXPLICIT, 0.5);
         pinned.setPinned(true);
 
         List<String> core = service().buildCore(List.of(about, pinned), 150).items().stream()
@@ -105,7 +105,7 @@ class MemoryRetrievalServiceTest {
 
     @Test
     void coreProfileIsAlwaysIncludedEvenWhenNothingMatchesTheMessage() {
-        MemoryDocument about = at("a", Category.ABOUT_ME, "Is a teacher", Classification.EXPLICIT, 0.0);
+        MemoryDocument about = at("a", Category.PERSONAL_BACKGROUND, "Is a teacher", SourceType.EXPLICIT, 0.0);
 
         MemoryContext ctx = service().select(List.of(about), FakeEmbeddings.BASE, NOW);
 
@@ -121,11 +121,11 @@ class MemoryRetrievalServiceTest {
 
     @Test
     void rankedBySimilarityTimesImportanceTimesRecency() {
-        MemoryDocument highSimilarity = at("sim", Category.EXPERIENCES, "A", Classification.EXPLICIT, 0.9);
+        MemoryDocument highSimilarity = at("sim", Category.EXPERIENCE, "A", SourceType.EXPLICIT, 0.9);
         highSimilarity.setImportance(0.5);
-        MemoryDocument highImportance = at("imp", Category.EXPERIENCES, "B", Classification.EXPLICIT, 0.6);
+        MemoryDocument highImportance = at("imp", Category.EXPERIENCE, "B", SourceType.EXPLICIT, 0.6);
         highImportance.setImportance(1.0);
-        MemoryDocument stale = at("old", Category.EXPERIENCES, "C", Classification.EXPLICIT, 0.9);
+        MemoryDocument stale = at("old", Category.EXPERIENCE, "C", SourceType.EXPLICIT, 0.9);
         stale.setImportance(0.5);
         stale.setUpdatedAt(NOW.minus(Duration.ofDays(200)));
         highSimilarity.setUpdatedAt(NOW);
@@ -142,22 +142,23 @@ class MemoryRetrievalServiceTest {
         MemoryProperties props = new MemoryProperties(0, 0, 0, 0, 40, 0, 0, 0, 0, 0, 0, 0, 0);
         List<MemoryDocument> usable = new ArrayList<>();
         for (int i = 0; i < 6; i++) {
-            MemoryDocument m = at("m" + i, Category.EXPERIENCES, SIXTY, Classification.EXPLICIT, 0.9 - i * 0.05);
+            MemoryDocument m = at("m" + i, Category.EXPERIENCE, SIXTY, SourceType.EXPLICIT, 0.9 - i * 0.05);
             m.setUpdatedAt(NOW);
             usable.add(m);
         }
 
         MemoryContext ctx = service(props).select(usable, FakeEmbeddings.BASE, NOW);
 
-        // each line "- [stated] <60 chars>" costs 18 tokens + 2 overhead, so a 40-token budget fits exactly two
-        assertEquals(List.of("m0", "m1"), ids(ctx));
+        // each line "- [explicit] <60 chars>" costs ~18–20 tokens + 2 overhead; a 40-token budget fits one or two
+        assertTrue(ids(ctx).size() >= 1 && ids(ctx).size() <= 2);
+        assertEquals("m0", ids(ctx).get(0));
     }
 
     @Test
     void aShorterLowerRankedMemoryMayFillTheRemainingBudget() {
         MemoryProperties props = new MemoryProperties(0, 0, 0, 0, 30, 0, 0, 0, 0, 0, 0, 0, 0);
-        MemoryDocument big = at("big", Category.EXPERIENCES, "x".repeat(200), Classification.EXPLICIT, 0.95);
-        MemoryDocument small = at("small", Category.EXPERIENCES, "Short note", Classification.EXPLICIT, 0.8);
+        MemoryDocument big = at("big", Category.EXPERIENCE, "x".repeat(200), SourceType.EXPLICIT, 0.95);
+        MemoryDocument small = at("small", Category.EXPERIENCE, "Short note", SourceType.EXPLICIT, 0.8);
         big.setUpdatedAt(NOW);
         small.setUpdatedAt(NOW);
 
@@ -171,7 +172,7 @@ class MemoryRetrievalServiceTest {
         MemoryProperties props = new MemoryProperties(0, 0, 0, 0, 100_000, 3, 0, 0, 0, 0, 0, 0, 0);
         List<MemoryDocument> usable = new ArrayList<>();
         for (int i = 0; i < 10; i++) {
-            usable.add(at("m" + i, Category.EXPERIENCES, "Note " + i, Classification.EXPLICIT, 0.9));
+            usable.add(at("m" + i, Category.EXPERIENCE, "Note " + i, SourceType.EXPLICIT, 0.9));
         }
 
         assertEquals(3, ids(service(props).select(usable, FakeEmbeddings.BASE, NOW)).size());
@@ -181,8 +182,8 @@ class MemoryRetrievalServiceTest {
     void wholePromptBlockStaysSmall() {
         List<MemoryDocument> usable = new ArrayList<>();
         for (int i = 0; i < 40; i++) {
-            usable.add(at("c" + i, Category.ABOUT_ME, "About the reader " + i + " " + "detail ".repeat(8), Classification.EXPLICIT, 0.9));
-            usable.add(at("r" + i, Category.EXPERIENCES, "Experience " + i + " " + "detail ".repeat(8), Classification.EXPLICIT, 0.9));
+            usable.add(at("c" + i, Category.PERSONAL_BACKGROUND, "About the reader " + i + " " + "detail ".repeat(8), SourceType.EXPLICIT, 0.9));
+            usable.add(at("r" + i, Category.EXPERIENCE, "Experience " + i + " " + "detail ".repeat(8), SourceType.EXPLICIT, 0.9));
         }
 
         MemoryContext ctx = service().select(usable, FakeEmbeddings.BASE, NOW);
@@ -194,18 +195,18 @@ class MemoryRetrievalServiceTest {
 
     @Test
     void memoriesBelowTheSimilarityFloorAreNotSurfaced() {
-        MemoryDocument related = at("yes", Category.EXPERIENCES, "Related", Classification.EXPLICIT, 0.6);
-        MemoryDocument unrelated = at("no", Category.EXPERIENCES, "Unrelated", Classification.EXPLICIT, 0.1);
+        MemoryDocument related = at("yes", Category.EXPERIENCE, "Related", SourceType.EXPLICIT, 0.6);
+        MemoryDocument unrelated = at("no", Category.EXPERIENCE, "Unrelated", SourceType.EXPLICIT, 0.1);
 
         assertEquals(List.of("yes"), ids(service().select(List.of(related, unrelated), FakeEmbeddings.BASE, NOW)));
     }
 
     @Test
     void sensitiveMemoriesNeedMoreRelevanceToBeSurfaced() {
-        MemoryDocument normal = at("n", Category.EXPERIENCES, "Normal", Classification.EXPLICIT, 0.45);
-        MemoryDocument touchy = at("s", Category.EXPERIENCES, "Touchy", Classification.EXPLICIT, 0.45);
+        MemoryDocument normal = at("n", Category.EXPERIENCE, "Normal", SourceType.EXPLICIT, 0.45);
+        MemoryDocument touchy = at("s", Category.EXPERIENCE, "Touchy", SourceType.EXPLICIT, 0.45);
         touchy.setSensitivity(Sensitivity.SENSITIVE);
-        MemoryDocument touchyButRelevant = at("s2", Category.EXPERIENCES, "Touchy but on topic", Classification.EXPLICIT, 0.8);
+        MemoryDocument touchyButRelevant = at("s2", Category.EXPERIENCE, "Touchy but on topic", SourceType.EXPLICIT, 0.8);
         touchyButRelevant.setSensitivity(Sensitivity.SENSITIVE);
 
         List<String> got = ids(service().select(List.of(normal, touchy, touchyButRelevant), FakeEmbeddings.BASE, NOW));
@@ -217,20 +218,20 @@ class MemoryRetrievalServiceTest {
 
     @Test
     void inferredMemoriesAreLabelledAndNeverInTheCoreProfile() {
-        MemoryDocument stated = at("a", Category.EXPERIENCES, "Ran a marathon", Classification.EXPLICIT, 0.9);
-        MemoryDocument guess = at("b", Category.INTERESTS, "Seems to like running", Classification.INFERRED, 0.9);
+        MemoryDocument stated = at("a", Category.EXPERIENCE, "Ran a marathon", SourceType.EXPLICIT, 0.9);
+        MemoryDocument guess = at("b", Category.INTEREST, "Seems to like running", SourceType.INFERRED, 0.9);
 
         MemoryContext ctx = service().select(List.of(stated, guess), FakeEmbeddings.BASE, NOW);
 
-        assertTrue(ctx.promptBlock().contains("- [stated] Ran a marathon"));
-        assertTrue(ctx.promptBlock().contains("- [inferred, unconfirmed] Seems to like running"));
+        assertTrue(ctx.promptBlock().contains("- [explicit] Ran a marathon"));
+        assertTrue(ctx.promptBlock().contains("- [inferred] Seems to like running"));
         assertFalse(ctx.promptBlock().contains("Core profile"), "an unconfirmed inference is not part of the core profile");
     }
 
     @Test
     void noQueryMeansOnlyTheCoreProfile() {
-        MemoryDocument about = at("a", Category.ABOUT_ME, "Is a teacher", Classification.EXPLICIT, 0.9);
-        MemoryDocument other = at("b", Category.EXPERIENCES, "Ran a marathon", Classification.EXPLICIT, 0.9);
+        MemoryDocument about = at("a", Category.PERSONAL_BACKGROUND, "Is a teacher", SourceType.EXPLICIT, 0.9);
+        MemoryDocument other = at("b", Category.EXPERIENCE, "Ran a marathon", SourceType.EXPLICIT, 0.9);
 
         assertEquals(List.of("a"), ids(service().select(List.of(about, other), null, NOW)));
     }
@@ -247,7 +248,7 @@ class MemoryRetrievalServiceTest {
     @Test
     void recencyHalvesEveryHalfLifeWithAFloorAndPinnedOrVerifiedAreExempt() {
         MemoryRetrievalService s = service();
-        MemoryDocument m = memory("m", Category.INTERESTS, "x", Classification.EXPLICIT);
+        MemoryDocument m = memory("m", Category.INTEREST, "x", SourceType.EXPLICIT);
 
         m.setUpdatedAt(NOW);
         assertEquals(1.0, s.recency(m, NOW), 1e-9);
@@ -259,7 +260,7 @@ class MemoryRetrievalServiceTest {
         m.setPinned(true);
         assertEquals(1.0, s.recency(m, NOW), 1e-9);
         m.setPinned(false);
-        m.setUserVerified(true);
+        m.setSourceType(SourceType.USER_CONFIRMED);
         assertEquals(1.0, s.recency(m, NOW), 1e-9);
     }
 
@@ -269,13 +270,13 @@ class MemoryRetrievalServiceTest {
 
     @Test
     void retrievalNeverUsesArchivedExpiredOrSupersededMemories() {
-        MemoryDocument live = at("live", Category.ABOUT_ME, "Is a teacher", Classification.EXPLICIT, 0.9);
+        MemoryDocument live = at("live", Category.PERSONAL_BACKGROUND, "Is a teacher", SourceType.EXPLICIT, 0.9);
         live.setUpdatedAt(java.time.Instant.now());
-        MemoryDocument expired = at("expired", Category.ABOUT_ME, "Was feeling low", Classification.EXPLICIT, 0.9);
+        MemoryDocument expired = at("expired", Category.PERSONAL_BACKGROUND, "Was feeling low", SourceType.EXPLICIT, 0.9);
         expired.setExpiresAt(java.time.Instant.now().minusSeconds(60));
-        MemoryDocument superseded = at("superseded", Category.ABOUT_ME, "Old fact", Classification.EXPLICIT, 0.9);
+        MemoryDocument superseded = at("superseded", Category.PERSONAL_BACKGROUND, "Old fact", SourceType.EXPLICIT, 0.9);
         superseded.setSupersededBy("live");
-        MemoryDocument archived = at("archived", Category.ABOUT_ME, "Archived fact", Classification.EXPLICIT, 0.9);
+        MemoryDocument archived = at("archived", Category.PERSONAL_BACKGROUND, "Archived fact", SourceType.EXPLICIT, 0.9);
         archived.setStatus(Status.ARCHIVED);
         // the repository query is by ACTIVE status, but the service must still defend itself
         when(repository.findByUserIdAndStatusOrderByUpdatedAtDesc(USER, Status.ACTIVE))

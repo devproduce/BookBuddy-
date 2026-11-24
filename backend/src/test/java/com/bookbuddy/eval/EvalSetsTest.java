@@ -208,7 +208,7 @@ class EvalSetsTest {
         assertTrue(rows.size() >= 8);
         assertUniqueIds("memory.jsonl", rows);
         Set<String> categories = Set.of(
-                "ABOUT_ME", "INTERESTS", "PREFERENCES", "GOALS", "EXPERIENCES", "OBSERVED_PATTERNS",
+                "PERSONAL_BACKGROUND", "INTEREST", "PREFERENCE", "GOAL", "EXPERIENCE", "PERSONALITY_OBSERVATION",
                 "EMOTIONAL_CONTEXT");
         boolean hasNegative = false;
         for (JsonNode r : rows) {
@@ -224,7 +224,7 @@ class EvalSetsTest {
             for (JsonNode e : r.get("expect").path("extract")) {
                 assertTrue(categories.contains(e.path("category").asText()),
                         r.get("id").asText() + ": unknown category " + e.path("category").asText());
-                assertTrue(Set.of("EXPLICIT", "INFERRED").contains(e.path("classification").asText()));
+                assertTrue(Set.of("EXPLICIT", "INFERRED").contains(e.path("SourceType").asText()));
             }
             hasNegative |= r.get("expect").path("notExtract").size() > 0;
         }

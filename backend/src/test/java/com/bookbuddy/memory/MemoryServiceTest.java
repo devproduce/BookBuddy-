@@ -25,7 +25,7 @@ import com.bookbuddy.common.ApiException;
 import com.bookbuddy.jobs.JobQueueDocument.Type;
 import com.bookbuddy.jobs.JobQueueService;
 import com.bookbuddy.memory.MemoryDocument.Category;
-import com.bookbuddy.memory.MemoryDocument.Classification;
+import com.bookbuddy.memory.MemoryDocument.SourceType;
 import com.bookbuddy.memory.MemoryDocument.Status;
 import com.bookbuddy.memory.MemoryDtos.CreateMemoryRequest;
 import com.bookbuddy.memory.MemoryDtos.MemoryResponse;
@@ -43,6 +43,7 @@ import org.mockito.ArgumentCaptor;
 class MemoryServiceTest {
 
     private final MemoryRepository repository = mock(MemoryRepository.class);
+    private final UserProfileRepository profiles = mock(UserProfileRepository.class);
     private final MemoryRetrievalService retrieval = mock(MemoryRetrievalService.class);
     private final UserRepository users = mock(UserRepository.class);
     private final JobQueueService jobs = mock(JobQueueService.class);
@@ -52,7 +53,8 @@ class MemoryServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new MemoryService(repository, new FakeEmbeddings(), retrieval, MemoryProperties.defaults(), users, jobs, llm);
+        service = new MemoryService(
+                repository, profiles, new FakeEmbeddings(), retrieval, MemoryProperties.defaults(), users, jobs, llm);
         user.setId(USER);
         user.setMemoryEnabled(true);
         when(users.findById(USER)).thenReturn(Optional.of(user));
@@ -67,9 +69,9 @@ class MemoryServiceTest {
 
     @Test
     void expirySweepMarksOverdueMemoriesExpiredButSkipsPinnedOnes() {
-        MemoryDocument due = memory("a", Category.EMOTIONAL_CONTEXT, "Stressed", Classification.EXPLICIT);
+        MemoryDocument due = memory("a", Category.EMOTIONAL_CONTEXT, "Stressed", SourceType.EXPLICIT);
         due.setExpiresAt(NOW.minusSeconds(5));
-        MemoryDocument pinned = memory("b", Category.EMOTIONAL_CONTEXT, "Anxious about move", Classification.EXPLICIT);
+        MemoryDocument pinned = memory("b", Category.EMOTIONAL_CONTEXT, "Anxious about move", SourceType.EXPLICIT);
         pinned.setExpiresAt(NOW.minusSeconds(5));
         pinned.setPinned(true);
         when(repository.findByStatusAndExpiresAtLessThan(Status.ACTIVE, NOW)).thenReturn(List.of(due, pinned));
@@ -85,7 +87,7 @@ class MemoryServiceTest {
 
     @Test
     void anOverdueMemoryIsShownAsExpiredEvenBeforeTheSweepRuns() {
-        MemoryDocument m = memory("a", Category.EMOTIONAL_CONTEXT, "Stressed", Classification.EXPLICIT);
+        MemoryDocument m = memory("a", Category.EMOTIONAL_CONTEXT, "Stressed", SourceType.EXPLICIT);
         m.setExpiresAt(Instant.now().minusSeconds(60));
 
         assertEquals(Status.EXPIRED, MemoryResponse.from(m, Instant.now()).status());
@@ -95,7 +97,7 @@ class MemoryServiceTest {
 
     @Test
     void responsesNeverExposeEmbeddings() {
-        MemoryResponse r = MemoryResponse.from(memory("a", Category.INTERESTS, "Likes poetry", Classification.EXPLICIT), NOW);
+        MemoryResponse r = MemoryResponse.from(memory("a", Category.INTEREST, "Likes poetry", SourceType.EXPLICIT), NOW);
         for (var component : MemoryResponse.class.getRecordComponents()) {
             assertFalse(component.getName().toLowerCase().contains("embedding"), component.getName());
         }
@@ -110,8 +112,7 @@ class MemoryServiceTest {
     void manuallyAddedMemoriesAreExplicitVerifiedAndEmotionalOnesStillExpire() {
         MemoryResponse r = service.create(USER, new CreateMemoryRequest(Category.EMOTIONAL_CONTEXT, "Nervous about a job interview", false));
 
-        assertEquals(Classification.EXPLICIT, r.classification());
-        assertTrue(r.userVerified());
+        assertEquals(SourceType.EXPLICIT, r.sourceType());
         assertNotNull(r.expiresAt());
         assertEquals(1.0, r.confidence(), 1e-9);
     }
@@ -126,16 +127,16 @@ class MemoryServiceTest {
     @Test
     void duplicatesAreRejected() {
         when(repository.findByUserIdAndStatusOrderByUpdatedAtDesc(USER, Status.ACTIVE))
-                .thenReturn(List.of(memory("a", Category.INTERESTS, "Likes poetry", Classification.EXPLICIT)));
+                .thenReturn(List.of(memory("a", Category.INTEREST, "Likes poetry", SourceType.EXPLICIT)));
 
         ApiException ex = assertThrows(ApiException.class,
-                () -> service.create(USER, new CreateMemoryRequest(Category.INTERESTS, "likes  POETRY!", null)));
+                () -> service.create(USER, new CreateMemoryRequest(Category.INTEREST, "likes  POETRY!", null)));
         assertEquals("MEMORY_DUPLICATE", ex.getCode());
     }
 
     @Test
     void editingTheTextMakesItStatedAndVerified() {
-        MemoryDocument guess = memory("a", Category.INTERESTS, "Probably likes poetry", Classification.INFERRED);
+        MemoryDocument guess = memory("a", Category.INTEREST, "Probably likes poetry", SourceType.INFERRED);
         when(repository.findByIdAndUserId("a", USER)).thenReturn(Optional.of(guess));
 
         service.update(USER, "a", new UpdateMemoryRequest(null, "Loves haiku", null, null));
@@ -143,13 +144,13 @@ class MemoryServiceTest {
         ArgumentCaptor<MemoryDocument> saved = ArgumentCaptor.forClass(MemoryDocument.class);
         verify(repository).save(saved.capture());
         assertEquals("Loves haiku", saved.getValue().getContent());
-        assertEquals(Classification.EXPLICIT, saved.getValue().getClassification());
-        assertTrue(saved.getValue().isUserVerified());
+        assertEquals(SourceType.EXPLICIT, saved.getValue().getSourceType());
+        assertTrue(saved.getValue().isStated());
     }
 
     @Test
     void pinningAnEmotionalMemoryClearsItsExpiryAndUnpinningRestoresIt() {
-        MemoryDocument m = memory("a", Category.EMOTIONAL_CONTEXT, "Stressed", Classification.EXPLICIT);
+        MemoryDocument m = memory("a", Category.EMOTIONAL_CONTEXT, "Stressed", SourceType.EXPLICIT);
         m.setExpiresAt(Instant.now().plus(Duration.ofDays(3)));
         when(repository.findByIdAndUserId("a", USER)).thenReturn(Optional.of(m));
 
@@ -162,7 +163,7 @@ class MemoryServiceTest {
 
     @Test
     void archivedMemoriesCannotBeEdited() {
-        MemoryDocument m = memory("a", Category.INTERESTS, "Old", Classification.EXPLICIT);
+        MemoryDocument m = memory("a", Category.INTEREST, "Old", SourceType.EXPLICIT);
         m.setStatus(Status.ARCHIVED);
         when(repository.findByIdAndUserId("a", USER)).thenReturn(Optional.of(m));
 
@@ -173,18 +174,18 @@ class MemoryServiceTest {
 
     @Test
     void confirmingLiftsTheInferredCapAndMarksItVerified() {
-        MemoryDocument guess = memory("a", Category.INTERESTS, "Probably likes poetry", Classification.INFERRED);
+        MemoryDocument guess = memory("a", Category.INTEREST, "Probably likes poetry", SourceType.INFERRED);
         when(repository.findByIdAndUserId("a", USER)).thenReturn(Optional.of(guess));
 
         MemoryResponse r = service.confirm(USER, "a");
 
-        assertTrue(r.userVerified());
+        assertEquals(SourceType.USER_CONFIRMED, r.sourceType());
         assertEquals(1.0, r.confidence(), 1e-9);
     }
 
     @Test
     void deletingIsAHardDelete() {
-        MemoryDocument m = memory("a", Category.INTERESTS, "Likes poetry", Classification.EXPLICIT);
+        MemoryDocument m = memory("a", Category.INTEREST, "Likes poetry", SourceType.EXPLICIT);
         when(repository.findByIdAndUserId("a", USER)).thenReturn(Optional.of(m));
 
         service.delete(USER, "a");

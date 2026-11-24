@@ -25,7 +25,7 @@ import com.bookbuddy.conversation.MessageDocument;
 import com.bookbuddy.conversation.MessageDocument.Role;
 import com.bookbuddy.jobs.JobHandler.BudgetDeferredException;
 import com.bookbuddy.memory.MemoryDocument.Category;
-import com.bookbuddy.memory.MemoryDocument.Classification;
+import com.bookbuddy.memory.MemoryDocument.SourceType;
 import com.bookbuddy.memory.MemoryExtractor.InvalidOutputException;
 import com.bookbuddy.quota.LlmBudgetService;
 import com.bookbuddy.quota.LlmBudgetService.Priority;
@@ -60,10 +60,10 @@ class MemoryExtractorTest {
             msg("m2", Role.ASSISTANT, "Great goal! Have you tried The Name of the Wind?"),
             msg("m3", Role.USER, "My doctor says I have anxiety so I prefer calm stories"));
 
-    private static String item(String category, String content, String classification, double confidence, String evidence) {
-        return "{\"category\":\"" + category + "\",\"content\":\"" + content + "\",\"classification\":\""
-                + classification + "\",\"confidence\":" + confidence + ",\"importance\":0.6,"
-                + "\"evidence\":\"" + evidence + "\",\"source_message_ids\":[\"m1\",\"zzz\"]}";
+    private static String item(String category, String content, String sourceType, double confidence, String evidence) {
+        return "{\"category\":\"" + category + "\",\"content\":\"" + content + "\",\"source_type\":\""
+                + sourceType + "\",\"confidence\":" + confidence + ",\"importance\":0.6,"
+                + "\"evidence\":[\"" + evidence + "\"],\"source_message_ids\":[\"m1\",\"zzz\"]}";
     }
 
     private static String reply(String... items) {
@@ -77,20 +77,20 @@ class MemoryExtractorTest {
     @Test
     void parserAcceptsAValidDocumentAndKeepsOnlyRealSourceIds() {
         var r = MemoryCandidateParser.parse(
-                reply(item("INTERESTS", "Loves slow-burn fantasy", "EXPLICIT", 0.9, "I love slow-burn fantasy")),
+                reply(item("INTEREST", "Loves slow-burn fantasy", "EXPLICIT", 0.9, "I love slow-burn fantasy")),
                 Set.of("m1", "m2"));
 
         assertTrue(r.valid());
         assertEquals(1, r.candidates().size());
         MemoryCandidate c = r.candidates().get(0);
-        assertEquals(Category.INTERESTS, c.category());
-        assertEquals(Classification.EXPLICIT, c.classification());
+        assertEquals(Category.INTEREST, c.category());
+        assertEquals(SourceType.EXPLICIT, c.sourceType());
         assertEquals(List.of("m1"), c.sourceMessageIds(), "ids outside the window are dropped");
     }
 
     @Test
     void parserToleratesCodeFencesAndChatter() {
-        String raw = "Sure! ```json\n" + reply(item("GOALS", "Wants to read 30 books", "EXPLICIT", 0.9, "30 books")) + "\n```";
+        String raw = "Sure! ```json\n" + reply(item("GOAL", "Wants to read 30 books", "EXPLICIT", 0.9, "30 books")) + "\n```";
         assertTrue(MemoryCandidateParser.parse(raw, Set.of()).valid());
     }
 
@@ -106,13 +106,13 @@ class MemoryExtractorTest {
     @Test
     void parserDiscardsInvalidItemsIndividually() {
         String raw = reply(
-                item("INTERESTS", "Valid one", "EXPLICIT", 0.9, "valid"),
+                item("INTEREST", "Valid one", "EXPLICIT", 0.9, "valid"),
                 item("NOT_A_CATEGORY", "Bad category", "EXPLICIT", 0.9, "x"),
-                item("INTERESTS", "Bad class", "MAYBE", 0.9, "x"),
-                item("INTERESTS", "Confidence out of range", "EXPLICIT", 1.5, "x"),
-                "{\"category\":\"INTERESTS\",\"content\":\"Confidence as text\",\"classification\":\"EXPLICIT\","
+                item("INTEREST", "Bad class", "MAYBE", 0.9, "x"),
+                item("INTEREST", "Confidence out of range", "EXPLICIT", 1.5, "x"),
+                "{\"category\":\"INTERESTS\",\"content\":\"Confidence as text\",\"SourceType\":\"EXPLICIT\","
                         + "\"confidence\":\"high\",\"importance\":0.5}",
-                "{\"category\":\"INTERESTS\",\"classification\":\"EXPLICIT\",\"confidence\":0.9,\"importance\":0.5}",
+                "{\"category\":\"INTERESTS\",\"SourceType\":\"EXPLICIT\",\"confidence\":0.9,\"importance\":0.5}",
                 "\"just a string\"");
 
         var r = MemoryCandidateParser.parse(raw, Set.of());
@@ -129,45 +129,45 @@ class MemoryExtractorTest {
     @Test
     void validCandidatesAreReturnedAndUsageIsRecordedWithoutContent() {
         when(llm.complete(anyString(), anyString())).thenReturn(reply(
-                item("INTERESTS", "Loves slow-burn fantasy", "EXPLICIT", 0.9, "I love slow-burn fantasy")));
+                item("INTEREST", "Loves slow-burn fantasy", "EXPLICIT", 0.9, "I love slow-burn fantasy")));
 
         List<MemoryCandidate> out = extractor.extract(USER, WINDOW);
 
         assertEquals(1, out.size());
-        assertEquals(Classification.EXPLICIT, out.get(0).classification());
+        assertEquals(SourceType.EXPLICIT, out.get(0).sourceType());
         verify(budget).record(eq(USER), eq(Priority.EXTRACTION), isNull(), any(), anyLong(), eq(true));
     }
 
     @Test
     void sensitiveInferencesFromTheModelAreDroppedButStatedOnesSurvive() {
         when(llm.complete(anyString(), anyString())).thenReturn(reply(
-                item("ABOUT_ME", "Has depression", "INFERRED", 0.9, ""),
-                item("ABOUT_ME", "Has anxiety", "EXPLICIT", 0.9, "I have anxiety"),
-                item("INTERESTS", "Loves slow-burn fantasy", "INFERRED", 0.95, "")));
+                item("PERSONAL_BACKGROUND", "Has depression", "INFERRED", 0.9, ""),
+                item("PERSONAL_BACKGROUND", "Has anxiety", "EXPLICIT", 0.9, "I have anxiety"),
+                item("INTEREST", "Loves slow-burn fantasy", "INFERRED", 0.95, "")));
 
         List<MemoryCandidate> out = extractor.extract(USER, WINDOW);
 
         assertEquals(List.of("Has anxiety", "Loves slow-burn fantasy"), out.stream().map(MemoryCandidate::content).toList());
         assertTrue(out.get(0).sensitive());
-        assertEquals(Classification.EXPLICIT, out.get(0).classification());
+        assertEquals(SourceType.EXPLICIT, out.get(0).sourceType());
         assertEquals(MemoryPolicy.INFERRED_CONFIDENCE_CAP, out.get(1).confidence(), 1e-9);
     }
 
     @Test
     void anExplicitClaimQuotingWordsTheUserNeverWroteIsDowngraded() {
         when(llm.complete(anyString(), anyString())).thenReturn(reply(
-                item("INTERESTS", "Loves horror", "EXPLICIT", 0.9, "I love horror")));
+                item("INTEREST", "Loves horror", "EXPLICIT", 0.9, "I love horror")));
 
         List<MemoryCandidate> out = extractor.extract(USER, WINDOW);
 
-        assertEquals(Classification.INFERRED, out.get(0).classification());
+        assertEquals(SourceType.INFERRED, out.get(0).sourceType());
     }
 
     @Test
     void retriesOnceWhenTheFirstReplyIsInvalid() {
         when(llm.complete(anyString(), anyString()))
                 .thenReturn("Sorry, here are some thoughts...")
-                .thenReturn(reply(item("INTERESTS", "Loves slow-burn fantasy", "EXPLICIT", 0.9, "I love slow-burn fantasy")));
+                .thenReturn(reply(item("INTEREST", "Loves slow-burn fantasy", "EXPLICIT", 0.9, "I love slow-burn fantasy")));
 
         List<MemoryCandidate> out = extractor.extract(USER, WINDOW);
 
@@ -222,9 +222,9 @@ class MemoryExtractorTest {
     void candidateCountIsCapped() {
         MemoryExtractor small = new MemoryExtractor(llm, budget, new MemoryProperties(0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0));
         when(llm.complete(anyString(), anyString())).thenReturn(reply(
-                item("INTERESTS", "One", "INFERRED", 0.6, ""),
-                item("INTERESTS", "Two", "INFERRED", 0.6, ""),
-                item("INTERESTS", "Three", "INFERRED", 0.6, "")));
+                item("INTEREST", "One", "INFERRED", 0.6, ""),
+                item("INTEREST", "Two", "INFERRED", 0.6, ""),
+                item("INTEREST", "Three", "INFERRED", 0.6, "")));
 
         assertEquals(2, small.extract(USER, WINDOW).size());
     }
