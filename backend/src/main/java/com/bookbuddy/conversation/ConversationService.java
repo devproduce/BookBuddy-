@@ -29,6 +29,7 @@ import com.bookbuddy.conversation.MessageDocument.InputMode;
 import com.bookbuddy.conversation.MessageDocument.Role;
 import com.bookbuddy.conversation.MessageDocument.Status;
 import com.bookbuddy.memory.MemoryContext;
+import com.bookbuddy.memory.MemoryControlService;
 import com.bookbuddy.memory.MemoryExtractionService;
 import com.bookbuddy.memory.MemoryRetrievalService;
 import com.bookbuddy.quota.LlmBudgetService;
@@ -102,6 +103,7 @@ public class ConversationService {
     private final RollingSummaryService summaries;
     private final MemoryRetrievalService memoryRetrieval;
     private final MemoryExtractionService memoryExtraction;
+    private final MemoryControlService memoryControl;
     private final LlmBudgetService budget;
 
     /** Pause between words when streaming an offline (extractive) answer. */
@@ -124,6 +126,7 @@ public class ConversationService {
             RollingSummaryService summaries,
             MemoryRetrievalService memoryRetrieval,
             MemoryExtractionService memoryExtraction,
+            MemoryControlService memoryControl,
             LlmBudgetService budget) {
         this.conversations = conversations;
         this.messages = messages;
@@ -141,6 +144,7 @@ public class ConversationService {
         this.summaries = summaries;
         this.memoryRetrieval = memoryRetrieval;
         this.memoryExtraction = memoryExtraction;
+        this.memoryControl = memoryControl;
         this.budget = budget;
     }
 
@@ -441,8 +445,19 @@ public class ConversationService {
                 scope.mode(),
                 conversation.getId());
 
-        MemoryContext memory = llm.isConfigured() ? recall(userId, question) : MemoryContext.EMPTY;
-        List<ChatMessage> prompt = buildPrompt(turn, level, scope, retrieve, retrieval, memory);
+        MemoryControlService.ControlResult memoryControlResult = MemoryControlService.ControlResult.NONE;
+        if (memoryControl != null
+                && turn.user() != null
+                && turn.user().isMemoryEnabled()
+                && !conversation.isIncognito()) {
+            memoryControlResult = memoryControl.handle(userId, question);
+        }
+
+        boolean personalTurn = intent == Intent.PERSONAL_REFLECTION || intent == Intent.MIXED;
+        MemoryContext memory = llm.isConfigured()
+                ? recall(turn, question, personalTurn)
+                : MemoryContext.EMPTY;
+        List<ChatMessage> prompt = buildPrompt(turn, level, scope, retrieve, retrieval, memory, memoryControlResult);
         StringBuilder out = new StringBuilder();
         String modelId = null;
         TokenUsage usage = null;
@@ -583,11 +598,14 @@ public class ConversationService {
     }
 
     /** Memories for this message; memory is an enhancement, so any problem just means "no memories". */
-    private MemoryContext recall(String userId, String question) {
-        if (memoryRetrieval == null) {
+    private MemoryContext recall(Turn turn, String question, boolean personalTurn) {
+        if (memoryRetrieval == null
+                || turn.user() == null
+                || !turn.user().isMemoryEnabled()
+                || turn.conversation().isIncognito()) {
             return MemoryContext.EMPTY;
         }
-        MemoryContext context = memoryRetrieval.retrieve(userId, question);
+        MemoryContext context = memoryRetrieval.retrieve(turn.conversation().getUserId(), question, personalTurn);
         return context == null ? MemoryContext.EMPTY : context;
     }
 
@@ -610,6 +628,12 @@ public class ConversationService {
     List<ChatMessage> buildPrompt(
             Turn turn, RiskLevel level, BookScope scope, boolean retrieve, Retrieval retrieval,
             MemoryContext memory) {
+        return buildPrompt(turn, level, scope, retrieve, retrieval, memory, MemoryControlService.ControlResult.NONE);
+    }
+
+    List<ChatMessage> buildPrompt(
+            Turn turn, RiskLevel level, BookScope scope, boolean retrieve, Retrieval retrieval,
+            MemoryContext memory, MemoryControlService.ControlResult memoryControlResult) {
         ConversationDocument conversation = turn.conversation();
         String question = turn.userMessage().getContent();
 
@@ -625,9 +649,14 @@ public class ConversationService {
         }
         system.append("- Preferred language: ").append(turn.language() == null ? "en" : turn.language())
                 .append(". Still mirror the language and script of the latest user message.\n");
-        system.append("- Write for THIS situation. Name their real pattern, apply any book wisdom to it, "
-                + "and sound like a friend — never the template of empathy + passage dump + technique + "
-                + "\"How does that feel?\".\n");
+        system.append("- Write for THIS situation. When passages are present, lead with book wisdom (~60%) and use "
+                + "personal notes (~40%) to make it land. Sound like a wise friend — never the template of empathy + "
+                + "passage dump + technique + \"How does that feel?\".\n");
+        if (memoryControlResult != null && memoryControlResult.handled()) {
+            system.append("- The user asked to forget or correct something. Acknowledge briefly and naturally "
+                    + "(e.g. \"").append(memoryControlResult.acknowledgment().replace("\"", "'"))
+                    .append("\"). Do not explain memory systems or list what was deleted.\n");
+        }
         if (scope.mode() == ScopeMode.NONE) {
             system.append("- The user turned book lookup off for this chat. Do not claim to consult their books.\n");
         } else if (retrieve && (retrieval == null || retrieval.isEmpty())) {
@@ -635,10 +664,9 @@ public class ConversationService {
                     + "Do not invent content from their books; you may still answer as their friend in general terms "
                     + "and say you could not find a matching passage.\n");
         } else if (retrieve && retrieval != null && !retrieval.isEmpty() && level != RiskLevel.ACUTE) {
-            system.append("- Passages from the user's library are included below. When one fits, bring its wisdom "
-                    + "the way a friend recalls a line, then use it to tackle their exact situation — do not "
-                    + "paraphrase the passage as a tip card. If they are only venting and nothing fits, stay with "
-                    + "them and skip the books.\n");
+            system.append("- Passages from the user's library are included below. Prefer book wisdom as the main "
+                    + "counsel (~60%), then briefly fit it to their situation with personal context (~40%). "
+                    + "If they are only venting and nothing fits, stay with them and skip the books.\n");
         }
         if (level == RiskLevel.ELEVATED) {
             system.append("- Safety note: the user may be in distress. Be especially gentle, do not minimise what "

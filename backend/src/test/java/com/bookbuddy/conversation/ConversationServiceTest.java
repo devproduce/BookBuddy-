@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -48,6 +49,7 @@ import com.bookbuddy.document.SectionType;
 import com.bookbuddy.document.TextCleaningService;
 import com.bookbuddy.embedding.HashEmbeddingProvider;
 import com.bookbuddy.memory.MemoryContext;
+import com.bookbuddy.memory.MemoryControlService;
 import com.bookbuddy.memory.MemoryExtractionService;
 import com.bookbuddy.memory.MemoryRetrievalService;
 import com.bookbuddy.quota.LlmBudgetService;
@@ -114,19 +116,24 @@ class ConversationServiceTest {
                 mock(BookChunkRepository.class));
         PromptLoader promptLoader = new PromptLoader(props);
 
+        MemoryControlService memoryControl = mock(MemoryControlService.class);
+        when(memoryControl.handle(anyString(), anyString())).thenReturn(MemoryControlService.ControlResult.NONE);
+
         service = new ConversationService(
                 conversations, messages, users, books, rag, llm,
                 new RiskClassifier(llm), new CrisisResponseService(props), safetyLogger, verifier,
                 new IntentRouter(), promptLoader, new RewriteService(promptLoader, llm, ragProps), summaries,
-                memoryRetrieval, memoryExtraction, budget);
+                memoryRetrieval, memoryExtraction, memoryControl, budget);
         service.setWordDelayMs(0);
         when(memoryRetrieval.retrieve(anyString(), anyString())).thenReturn(MemoryContext.EMPTY);
+        when(memoryRetrieval.retrieve(anyString(), anyString(), anyBoolean())).thenReturn(MemoryContext.EMPTY);
 
         user = new UserDocument();
         user.setId(USER);
         user.setDisplayName("Himan");
         user.setConsent(new UserDocument.Consent("v1", Instant.now()));
         user.setDefaultLanguage("en");
+        user.setMemoryEnabled(true);
         when(users.findById(USER)).thenReturn(Optional.of(user));
 
         conversation = new ConversationDocument();
@@ -437,7 +444,7 @@ class ConversationServiceTest {
         assertEquals(3, cite.pageStart());
         assertEquals("The keeper lived alone for forty years.", cite.excerpt());
         assertEquals("test-model", reply.getModelId());
-        assertEquals("chat.system.v3", reply.getPromptVersion());
+        assertEquals("chat.system.v4", reply.getPromptVersion());
         assertEquals(150, reply.getTokenUsage().totalTokens());
         assertEquals(Status.COMPLETE, reply.getStatus());
 
@@ -824,7 +831,7 @@ class ConversationServiceTest {
     @Test
     void memoriesAreInjectedIntoThePromptAndRecordedOnTheAssistantMessage() {
         llmStreams("Happy to help.");
-        when(memoryRetrieval.retrieve(USER, "recommend something")).thenReturn(new MemoryContext(
+        when(memoryRetrieval.retrieve(eq(USER), eq("recommend something"), anyBoolean())).thenReturn(new MemoryContext(
                 "# What you know about this user\n- [stated] Loves cosy mysteries", List.of("mem1", "mem2"), 20));
 
         Recorder rec = run("recommend something");
@@ -848,7 +855,7 @@ class ConversationServiceTest {
     void offlineRepliesNeverReadOrClaimMemories() {
         // llm.isConfigured() is false in setUp
         run("hello offline");
-        verify(memoryRetrieval, never()).retrieve(anyString(), anyString());
+        verify(memoryRetrieval, never()).retrieve(anyString(), anyString(), anyBoolean());
         assertTrue(stored(Role.ASSISTANT).get(0).getMemoryIdsUsed().isEmpty());
     }
 
@@ -856,7 +863,7 @@ class ConversationServiceTest {
     void crisisReplyUsesNoMemories() {
         when(llm.isConfigured()).thenReturn(true);
         run("I want to kill myself");
-        verify(memoryRetrieval, never()).retrieve(anyString(), anyString());
+        verify(memoryRetrieval, never()).retrieve(anyString(), anyString(), anyBoolean());
     }
 
     @Test

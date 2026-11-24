@@ -95,7 +95,7 @@ public record BookBuddyProperties(
      */
     public record Prompt(String chatSystemId, String queryRewriteId) {
 
-        public static final String DEFAULT_CHAT_SYSTEM_ID = "chat.system.v3";
+        public static final String DEFAULT_CHAT_SYSTEM_ID = "chat.system.v4";
         public static final String DEFAULT_QUERY_REWRITE_ID = "query-rewrite.v1";
 
         public Prompt {

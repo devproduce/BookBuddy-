@@ -10,6 +10,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -62,18 +63,27 @@ public class MemoryRetrievalService {
     private final EmbeddingProvider embeddings;
     private final MemoryProperties props;
     private final MongoTemplate mongo;
+    private final MemoryEngineClient engine;
 
     public MemoryRetrievalService(
             MemoryRepository repository,
             UserProfileRepository profiles,
             EmbeddingProvider embeddings,
             MemoryProperties props,
-            MongoTemplate mongo) {
+            MongoTemplate mongo,
+            MemoryEngineClient engine) {
         this.repository = repository;
         this.profiles = profiles;
         this.embeddings = embeddings;
         this.props = props;
         this.mongo = mongo;
+        this.engine = engine;
+    }
+
+    /** Test helper without profile store or LLM enrichment. */
+    MemoryRetrievalService(
+            MemoryRepository repository, EmbeddingProvider embeddings, MemoryProperties props, MongoTemplate mongo) {
+        this(repository, null, embeddings, props, mongo, null);
     }
 
     // ---------------------------------------------------------------------------------------------------------
@@ -82,17 +92,114 @@ public class MemoryRetrievalService {
 
     /** Memories for one chat turn. Never throws: memory is an enhancement, not a dependency. */
     public MemoryContext retrieve(String userId, String message) {
+        return retrieve(userId, message, false);
+    }
+
+    /**
+     * @param personalTurn when true, optionally enrich with LLM RETRIEVAL for interaction approach
+     */
+    public MemoryContext retrieve(String userId, String message, boolean personalTurn) {
         try {
             Instant now = Instant.now();
             List<MemoryDocument> usable = usable(userId, now);
-            UserProfileDocument profile = profiles.findByUserId(userId).orElse(null);
+            UserProfileDocument profile = profiles == null
+                    ? null
+                    : profiles.findByUserId(userId).orElse(null);
             float[] query = message == null || message.isBlank() ? null : embeddings.embedQuery(message);
             MemoryContext context = select(usable, profile, query, now);
+            if (personalTurn && engine != null && !usable.isEmpty()) {
+                context = enrichWithLlmRetrieval(userId, message, profile, usable, context);
+            }
             markUsed(context.memoryIds(), now);
             return context;
         } catch (RuntimeException e) {
             log.warn("Memory retrieval failed ({}); continuing without memories", e.getClass().getSimpleName());
             return MemoryContext.EMPTY;
+        }
+    }
+
+    private MemoryContext enrichWithLlmRetrieval(
+            String userId,
+            String message,
+            UserProfileDocument profile,
+            List<MemoryDocument> usable,
+            MemoryContext base) {
+        try {
+            List<MemoryDocument> candidates = new ArrayList<>();
+            Set<String> baseIds = new HashSet<>(base.memoryIds());
+            for (MemoryDocument m : usable) {
+                if (baseIds.contains(m.getId())) {
+                    candidates.add(m);
+                }
+            }
+            for (MemoryDocument m : usable) {
+                if (candidates.size() >= 24) {
+                    break;
+                }
+                if (!baseIds.contains(m.getId())) {
+                    candidates.add(m);
+                }
+            }
+            MemoryEngineResult result = engine.retrieve(userId, message, candidates, profile);
+            if (result.relevantMemoryIds().isEmpty()
+                    && (result.suggestedInteractionApproach() == null
+                            || result.suggestedInteractionApproach().isBlank())
+                    && result.interactionContext().isBlank()) {
+                return base;
+            }
+            Map<String, MemoryDocument> byId = new HashMap<>();
+            for (MemoryDocument m : usable) {
+                byId.put(m.getId(), m);
+            }
+            List<String> ids = new ArrayList<>();
+            StringBuilder relevant = new StringBuilder();
+            for (String id : result.relevantMemoryIds()) {
+                MemoryDocument m = byId.get(id);
+                if (m == null || ids.contains(id)) {
+                    continue;
+                }
+                ids.add(id);
+                relevant.append(relevantLine(m)).append('\n');
+                if (ids.size() >= props.maxMemoriesPerPrompt()) {
+                    break;
+                }
+            }
+            if (ids.isEmpty()) {
+                ids.addAll(base.memoryIds());
+            }
+            StringBuilder block = new StringBuilder(HEADER);
+            appendProfile(block, profile);
+            if (!result.interactionContext().isBlank() || !blank(result.suggestedInteractionApproach())) {
+                block.append("Suggested approach for this turn:\n");
+                if (!blank(result.suggestedInteractionApproach())) {
+                    block.append("- ").append(result.suggestedInteractionApproach().strip()).append('\n');
+                }
+                UserProfileDocument.InteractionContext ix = new UserProfileDocument.InteractionContext();
+                ix.setPreferredTone(result.interactionContext().preferredTone());
+                ix.setPreferredDetailLevel(result.interactionContext().preferredDetailLevel());
+                ix.setPersonalizationGuidelines(
+                        new ArrayList<>(result.interactionContext().personalizationGuidelines()));
+                UserProfileDocument tmp = new UserProfileDocument();
+                tmp.setInteractionContext(ix);
+                // reuse formatter for guidelines only
+                if (!result.interactionContext().personalizationGuidelines().isEmpty()) {
+                    for (String g : result.interactionContext().personalizationGuidelines()) {
+                        if (!blank(g)) {
+                            block.append("- ").append(g).append('\n');
+                        }
+                    }
+                }
+            }
+            if (relevant.length() > 0) {
+                block.append("Relevant to this message:\n").append(relevant);
+            } else if (!base.promptBlock().isBlank()) {
+                return base;
+            }
+            String text = block.toString().stripTrailing();
+            return new MemoryContext(text, ids, TokenEstimator.estimate(text));
+        } catch (RuntimeException e) {
+            log.debug("LLM retrieval enrichment skipped: {}", e.getClass().getSimpleName());
+            return base;
         }
     }
 
