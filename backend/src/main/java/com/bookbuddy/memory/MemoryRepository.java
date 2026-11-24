@@ -26,7 +26,7 @@ public interface MemoryRepository extends MongoRepository<MemoryDocument, String
     /** Active memories whose expiry has passed (pinned ones have no {@code expiresAt}). */
     List<MemoryDocument> findByStatusAndExpiresAtLessThan(Status status, Instant before);
 
-    List<MemoryDocument> findByUserIdAndSourceConversationId(String userId, String sourceConversationId);
+    List<MemoryDocument> findByUserIdAndSourceConversationIdsContaining(String userId, String sourceConversationId);
 
     long countByUserIdAndStatus(String userId, Status status);
 

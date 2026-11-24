@@ -9,10 +9,12 @@ import com.bookbuddy.embedding.VectorMath;
 import com.bookbuddy.jobs.JobQueueDocument;
 import com.bookbuddy.jobs.JobQueueService;
 import com.bookbuddy.memory.MemoryDocument.Category;
-import com.bookbuddy.memory.MemoryDocument.Classification;
 import com.bookbuddy.memory.MemoryDocument.Sensitivity;
+import com.bookbuddy.memory.MemoryDocument.SourceType;
+import com.bookbuddy.memory.MemoryDocument.Stability;
 import com.bookbuddy.memory.MemoryDocument.Status;
 import com.bookbuddy.memory.MemoryDtos.CreateMemoryRequest;
+import com.bookbuddy.memory.MemoryDtos.InteractionContextDto;
 import com.bookbuddy.memory.MemoryDtos.JobResponse;
 import com.bookbuddy.memory.MemoryDtos.MemoryResponse;
 import com.bookbuddy.memory.MemoryDtos.ProfileResponse;
@@ -22,6 +24,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -34,16 +37,10 @@ public class MemoryService {
 
     static final int MAX_MEMORIES_PER_USER = 500;
 
-    private static final Map<Category, Double> DEFAULT_IMPORTANCE = Map.of(
-            Category.ABOUT_ME, 0.8,
-            Category.GOALS, 0.7,
-            Category.PREFERENCES, 0.7,
-            Category.INTERESTS, 0.6,
-            Category.EXPERIENCES, 0.5,
-            Category.EMOTIONAL_CONTEXT, 0.5,
-            Category.OBSERVED_PATTERNS, 0.4);
+    private static final Map<Category, Double> DEFAULT_IMPORTANCE = defaultImportance();
 
     private final MemoryRepository repository;
+    private final UserProfileRepository profiles;
     private final EmbeddingProvider embeddings;
     private final MemoryRetrievalService retrieval;
     private final MemoryProperties props;
@@ -53,6 +50,7 @@ public class MemoryService {
 
     public MemoryService(
             MemoryRepository repository,
+            UserProfileRepository profiles,
             EmbeddingProvider embeddings,
             MemoryRetrievalService retrieval,
             MemoryProperties props,
@@ -60,6 +58,7 @@ public class MemoryService {
             JobQueueService jobs,
             LlmProvider llm) {
         this.repository = repository;
+        this.profiles = profiles;
         this.embeddings = embeddings;
         this.retrieval = retrieval;
         this.props = props;
@@ -104,11 +103,21 @@ public class MemoryService {
     public ProfileResponse profile(String userId) {
         CoreProfile core = retrieval.coreProfile(userId);
         Instant now = Instant.now();
+        UserProfileDocument stored = profiles.findByUserId(userId).orElse(null);
+        String summary = stored != null && stored.getProfileSummary() != null
+                ? stored.getProfileSummary()
+                : core.text();
+        String text = summary == null || summary.isBlank() ? core.text() : summary;
+        InteractionContextDto interaction = stored != null
+                ? InteractionContextDto.from(stored.getInteractionContext())
+                : InteractionContextDto.empty();
         return new ProfileResponse(
-                core.text(),
+                text,
+                summary == null ? "" : summary,
                 core.estimatedTokens(),
                 props.coreProfileTokens(),
-                core.items().stream().map(m -> MemoryResponse.from(m, now)).toList());
+                core.items().stream().map(m -> MemoryResponse.from(m, now)).toList(),
+                interaction);
     }
 
     // ---------------------------------------------------------------------------------------------------------
@@ -138,22 +147,25 @@ public class MemoryService {
         m.setUserId(userId);
         m.setCategory(request.category());
         m.setContent(content);
-        m.setClassification(Classification.EXPLICIT);
+        m.setSourceType(SourceType.EXPLICIT);
         m.setConfidence(1.0);
         m.setImportance(DEFAULT_IMPORTANCE.getOrDefault(request.category(), 0.5));
+        m.setRecurrence(1);
+        m.setStability(Stability.STABLE);
         m.setEmbedding(VectorMath.toList(embeddings.embedPassage(content)));
         m.setEmbeddingModel(embeddings.modelName());
         m.setSensitivity(SensitiveTopics.isSensitive(content) ? Sensitivity.SENSITIVE : Sensitivity.NORMAL);
-        m.setUserVerified(true);
+        m.setNeedsConfirmation(false);
         m.setPinned(pinned);
         m.setStatus(Status.ACTIVE);
-        m.setExpiresAt(MemoryPolicy.defaultExpiry(request.category(), pinned, now, props.emotionalContextDays()));
+        m.setExpiresAt(MemoryPolicy.defaultExpiry(
+                request.category(), Stability.STABLE, pinned, now, props.emotionalContextDays()));
         m.setCreatedAt(now);
         m.setUpdatedAt(now);
         return MemoryResponse.from(repository.save(m), now);
     }
 
-    /** Editing sets {@code userVerified}: the user's wording is the truth now. */
+    /** Editing sets source to EXPLICIT: the user's wording is the truth now. */
     public MemoryResponse update(String userId, String id, UpdateMemoryRequest request) {
         MemoryDocument m = find(userId, id);
         if (m.getStatus() != Status.ACTIVE && m.getStatus() != Status.EXPIRED) {
@@ -174,13 +186,14 @@ public class MemoryService {
                     m.setSensitivity(Sensitivity.SENSITIVE);
                 }
             }
-            m.setClassification(Classification.EXPLICIT);
+            m.setSourceType(SourceType.EXPLICIT);
             m.setConfidence(1.0);
-            m.setUserVerified(true);
+            m.setNeedsConfirmation(false);
         }
         if (request.category() != null) {
             m.setCategory(request.category());
-            m.setUserVerified(true);
+            m.setSourceType(SourceType.EXPLICIT);
+            m.setNeedsConfirmation(false);
         }
         if (request.sensitive() != null) {
             boolean detected = SensitiveTopics.isSensitive(m.getContent());
@@ -189,8 +202,12 @@ public class MemoryService {
         if (request.pinned() != null) {
             m.setPinned(request.pinned());
         }
-        // Expiry follows category and pin state, and an edit renews a fading memory.
-        m.setExpiresAt(MemoryPolicy.defaultExpiry(m.getCategory(), m.isPinned(), now, props.emotionalContextDays()));
+        m.setExpiresAt(MemoryPolicy.defaultExpiry(
+                m.getCategory(),
+                m.getStability() == null ? Stability.EVOLVING : m.getStability(),
+                m.isPinned(),
+                now,
+                props.emotionalContextDays()));
         if (m.getStatus() == Status.EXPIRED) {
             m.setStatus(Status.ACTIVE);
         }
@@ -198,15 +215,16 @@ public class MemoryService {
         return MemoryResponse.from(repository.save(m), now);
     }
 
-    /** The user confirms an inferred observation: it becomes a verified, fully trusted memory. */
+    /** The user confirms an inferred observation: it becomes USER_CONFIRMED. */
     public MemoryResponse confirm(String userId, String id) {
         MemoryDocument m = find(userId, id);
         if (m.getStatus() != Status.ACTIVE) {
             throw ApiException.conflict("MEMORY_NOT_ACTIVE", "This memory was replaced or expired.");
         }
         Instant now = now();
-        m.setUserVerified(true);
+        m.setSourceType(SourceType.USER_CONFIRMED);
         m.setConfidence(1.0);
+        m.setNeedsConfirmation(false);
         m.setUpdatedAt(now);
         return MemoryResponse.from(repository.save(m), now);
     }
@@ -221,6 +239,7 @@ public class MemoryService {
     public long clear(String userId) {
         long n = repository.findByUserIdOrderByUpdatedAtDesc(userId).size();
         repository.deleteByUserId(userId);
+        profiles.deleteByUserId(userId);
         return n;
     }
 
@@ -293,5 +312,26 @@ public class MemoryService {
 
     private static Instant now() {
         return Instant.now().truncatedTo(ChronoUnit.MILLIS);
+    }
+
+    private static Map<Category, Double> defaultImportance() {
+        Map<Category, Double> map = new EnumMap<>(Category.class);
+        map.put(Category.PERSONAL_BACKGROUND, 0.8);
+        map.put(Category.GOAL, 0.75);
+        map.put(Category.COMMUNICATION_STYLE, 0.75);
+        map.put(Category.PREFERENCE, 0.7);
+        map.put(Category.VALUE, 0.7);
+        map.put(Category.LEARNING_PREFERENCE, 0.7);
+        map.put(Category.READING_PREFERENCE, 0.65);
+        map.put(Category.INTEREST, 0.6);
+        map.put(Category.THINKING_PATTERN, 0.55);
+        map.put(Category.RECURRING_CHALLENGE, 0.55);
+        map.put(Category.EXPERIENCE, 0.5);
+        map.put(Category.ACHIEVEMENT, 0.5);
+        map.put(Category.CURRENT_ACTIVITY, 0.5);
+        map.put(Category.EMOTIONAL_CONTEXT, 0.45);
+        map.put(Category.PERSONALITY_OBSERVATION, 0.4);
+        map.put(Category.RELATIONSHIP_CONTEXT, 0.4);
+        return Map.copyOf(map);
     }
 }

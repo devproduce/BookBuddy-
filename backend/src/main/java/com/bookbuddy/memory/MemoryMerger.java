@@ -3,8 +3,9 @@ package com.bookbuddy.memory;
 import com.bookbuddy.embedding.EmbeddingProvider;
 import com.bookbuddy.embedding.VectorMath;
 import com.bookbuddy.memory.MemoryDocument.Category;
-import com.bookbuddy.memory.MemoryDocument.Classification;
 import com.bookbuddy.memory.MemoryDocument.Sensitivity;
+import com.bookbuddy.memory.MemoryDocument.SourceType;
+import com.bookbuddy.memory.MemoryDocument.Stability;
 import com.bookbuddy.memory.MemoryDocument.Status;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -105,13 +106,13 @@ public class MemoryMerger {
         }
         MemoryDocument e = best.memory();
         double s = best.similarity();
-        boolean candidateExplicit = c.classification() == Classification.EXPLICIT;
+        boolean candidateExplicit = c.sourceType() == SourceType.EXPLICIT;
 
         if (e.getCategory() != c.category()) {
             // a different facet of the person: only a near-identical statement counts as already known
             return new Decision(s >= t.duplicate() ? Action.IGNORE : Action.ADD, e, s);
         }
-        if (candidateExplicit && !e.isUserVerified() && e.getClassification() == Classification.INFERRED) {
+        if (candidateExplicit && e.getSourceType() == SourceType.INFERRED) {
             return new Decision(Action.UPDATE, e, s); // the user said it themselves: replaces the guess
         }
         if (!candidateExplicit && e.isStated()) {
@@ -181,16 +182,25 @@ public class MemoryMerger {
         m.setUserId(userId);
         m.setCategory(c.category());
         m.setContent(c.content());
-        m.setSourceConversationId(conversationId);
+        List<String> convIds = new ArrayList<>(c.sourceConversationIds());
+        if (conversationId != null && !conversationId.isBlank() && !convIds.contains(conversationId)) {
+            convIds.add(conversationId);
+        }
+        m.setSourceConversationIds(convIds);
         m.setSourceMessageIds(new ArrayList<>(c.sourceMessageIds()));
-        m.setClassification(c.classification());
-        m.setConfidence(cap(c.classification(), false, c.confidence()));
+        m.setEvidence(new ArrayList<>(c.evidence()));
+        m.setSourceType(c.sourceType());
+        m.setConfidence(cap(c.sourceType(), c.confidence()));
         m.setImportance(c.importance());
+        m.setRecurrence(Math.max(0, c.recurrence()));
+        m.setStability(c.stability() == null ? Stability.EVOLVING : c.stability());
         m.setEmbedding(VectorMath.toList(embedding));
         m.setEmbeddingModel(embeddings.modelName());
         m.setSensitivity(c.sensitive() ? Sensitivity.SENSITIVE : Sensitivity.NORMAL);
+        m.setNeedsConfirmation(c.needsConfirmation() && c.sourceType() == SourceType.INFERRED);
         m.setStatus(Status.ACTIVE);
-        m.setExpiresAt(MemoryPolicy.defaultExpiry(c.category(), false, now, props.emotionalContextDays()));
+        m.setExpiresAt(MemoryPolicy.defaultExpiry(
+                c.category(), m.getStability(), false, now, props.emotionalContextDays()));
         m.setCreatedAt(now);
         m.setUpdatedAt(now);
         return m;
@@ -200,18 +210,30 @@ public class MemoryMerger {
         target.setContent(content);
         target.setEmbedding(VectorMath.toList(embeddings.embedPassage(content)));
         target.setEmbeddingModel(embeddings.modelName());
-        if (c.classification() == Classification.EXPLICIT) {
-            target.setClassification(Classification.EXPLICIT);
+        if (c.sourceType() == SourceType.EXPLICIT) {
+            target.setSourceType(SourceType.EXPLICIT);
+            target.setNeedsConfirmation(false);
         }
-        target.setConfidence(cap(target.getClassification(), target.isUserVerified(),
-                Math.max(target.getConfidence(), c.confidence())));
+        target.setConfidence(cap(target.getSourceType(), Math.max(target.getConfidence(), c.confidence())));
         target.setImportance(Math.max(target.getImportance(), c.importance()));
+        target.setRecurrence(Math.max(target.getRecurrence(), c.recurrence()));
+        if (c.stability() != null) {
+            target.setStability(c.stability());
+        }
         if (c.sensitive()) {
             target.setSensitivity(Sensitivity.SENSITIVE);
         }
-        if (target.getSourceConversationId() == null) {
-            target.setSourceConversationId(conversationId);
+        List<String> convIds = new ArrayList<>(
+                target.getSourceConversationIds() == null ? List.of() : target.getSourceConversationIds());
+        if (conversationId != null && !conversationId.isBlank() && !convIds.contains(conversationId)) {
+            convIds.add(conversationId);
         }
+        for (String id : c.sourceConversationIds()) {
+            if (!convIds.contains(id)) {
+                convIds.add(id);
+            }
+        }
+        target.setSourceConversationIds(convIds);
         List<String> sources = new ArrayList<>(
                 target.getSourceMessageIds() == null ? List.of() : target.getSourceMessageIds());
         for (String id : c.sourceMessageIds()) {
@@ -220,8 +242,17 @@ public class MemoryMerger {
             }
         }
         target.setSourceMessageIds(sources);
-        if (target.getCategory() == Category.EMOTIONAL_CONTEXT && !target.isPinned()) {
-            target.setExpiresAt(now.plus(java.time.Duration.ofDays(props.emotionalContextDays()))); // renewed
+        List<String> evidence = new ArrayList<>(
+                target.getEvidence() == null ? List.of() : target.getEvidence());
+        for (String e : c.evidence()) {
+            if (!evidence.contains(e)) {
+                evidence.add(e);
+            }
+        }
+        target.setEvidence(evidence);
+        if ((target.getCategory() == Category.EMOTIONAL_CONTEXT || target.getStability() == Stability.TEMPORARY)
+                && !target.isPinned()) {
+            target.setExpiresAt(now.plus(java.time.Duration.ofDays(props.emotionalContextDays())));
         }
         target.setUpdatedAt(now);
     }
@@ -240,9 +271,9 @@ public class MemoryMerger {
         return joined.length() <= MemoryPolicy.MAX_CONTENT_CHARS ? joined : candidate;
     }
 
-    private static double cap(Classification classification, boolean userVerified, double confidence) {
+    private static double cap(SourceType sourceType, double confidence) {
         double c = MemoryPolicy.clamp01(confidence);
-        return classification == Classification.INFERRED && !userVerified
+        return sourceType == SourceType.INFERRED
                 ? Math.min(c, MemoryPolicy.INFERRED_CONFIDENCE_CAP)
                 : c;
     }

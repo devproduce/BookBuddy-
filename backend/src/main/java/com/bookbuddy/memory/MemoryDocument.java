@@ -20,19 +20,35 @@ import org.springframework.data.mongodb.core.mapping.Document;
 public class MemoryDocument {
 
     public enum Category {
-        ABOUT_ME,
-        INTERESTS,
-        PREFERENCES,
-        GOALS,
-        EXPERIENCES,
-        OBSERVED_PATTERNS,
-        EMOTIONAL_CONTEXT
+        PERSONAL_BACKGROUND,
+        INTEREST,
+        PREFERENCE,
+        COMMUNICATION_STYLE,
+        PERSONALITY_OBSERVATION,
+        THINKING_PATTERN,
+        GOAL,
+        VALUE,
+        EXPERIENCE,
+        RECURRING_CHALLENGE,
+        EMOTIONAL_CONTEXT,
+        RELATIONSHIP_CONTEXT,
+        READING_PREFERENCE,
+        LEARNING_PREFERENCE,
+        ACHIEVEMENT,
+        CURRENT_ACTIVITY
     }
 
-    /** EXPLICIT: the user said it. INFERRED: Book Buddy guessed it; stays unconfirmed until the user confirms. */
-    public enum Classification {
+    /** EXPLICIT: user said it. INFERRED: model guessed. USER_CONFIRMED: inferred then confirmed. */
+    public enum SourceType {
         EXPLICIT,
-        INFERRED
+        INFERRED,
+        USER_CONFIRMED
+    }
+
+    public enum Stability {
+        STABLE,
+        EVOLVING,
+        TEMPORARY
     }
 
     public enum Sensitivity {
@@ -54,10 +70,11 @@ public class MemoryDocument {
     private Category category;
     private String content;
 
-    private String sourceConversationId;
+    private List<String> sourceConversationIds = new ArrayList<>();
     private List<String> sourceMessageIds = new ArrayList<>();
+    private List<String> evidence = new ArrayList<>();
 
-    private Classification classification = Classification.EXPLICIT;
+    private SourceType sourceType = SourceType.EXPLICIT;
 
     /** 0..1. INFERRED memories never exceed {@link MemoryPolicy#INFERRED_CONFIDENCE_CAP} until confirmed. */
     private double confidence = 1.0;
@@ -65,11 +82,19 @@ public class MemoryDocument {
     /** 0..1: how useful this is to bring up. */
     private double importance = 0.5;
 
+    /** How often the pattern has appeared (conversation references). */
+    private int recurrence;
+
+    private Stability stability = Stability.EVOLVING;
+
     private List<Double> embedding = new ArrayList<>();
     private String embeddingModel;
 
     private Sensitivity sensitivity = Sensitivity.NORMAL;
-    private boolean userVerified;
+
+    /** High-impact inferences awaiting a soft confirmation on the Memory Page. */
+    private boolean needsConfirmation;
+
     private boolean pinned;
 
     /** Id of the memory that replaced this one; set together with {@code status = ARCHIVED}. */
@@ -87,6 +112,10 @@ public class MemoryDocument {
 
     /** True once the user has stated or confirmed it: such a memory is a "stated" fact in prompts. */
     public boolean isStated() {
-        return classification == Classification.EXPLICIT || userVerified;
+        return sourceType == SourceType.EXPLICIT || sourceType == SourceType.USER_CONFIRMED;
+    }
+
+    public boolean isUserConfirmed() {
+        return sourceType == SourceType.USER_CONFIRMED;
     }
 }

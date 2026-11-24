@@ -139,8 +139,10 @@ public class MemoryRebuildService implements JobHandler {
         List<MemoryDocument> replaceable = new ArrayList<>();
         List<MemoryDocument> working = new ArrayList<>();
         for (MemoryDocument m : existing) {
-            boolean auto = !m.isUserVerified() && !m.isPinned();
-            if (auto && m.getSourceConversationId() != null && processed.contains(m.getSourceConversationId())) {
+            boolean auto = !m.isUserConfirmed() && !m.isPinned() && m.getSourceType() != MemoryDocument.SourceType.EXPLICIT;
+            boolean fromProcessed = m.getSourceConversationIds() != null
+                    && m.getSourceConversationIds().stream().anyMatch(processed::contains);
+            if (auto && fromProcessed) {
                 replaceable.add(m);
             } else {
                 working.add(m);

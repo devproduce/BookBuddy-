@@ -1,7 +1,8 @@
 package com.bookbuddy.memory;
 
 import com.bookbuddy.memory.MemoryDocument.Category;
-import com.bookbuddy.memory.MemoryDocument.Classification;
+import com.bookbuddy.memory.MemoryDocument.SourceType;
+import com.bookbuddy.memory.MemoryDocument.Stability;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
@@ -10,24 +11,8 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * Validates the extraction LLM's structured output.
- *
- * <pre>
- * {"memories":[{
- *   "category":"INTERESTS",            // one of the Category names
- *   "content":"Loves slow-burn fantasy", // 3..300 chars
- *   "classification":"EXPLICIT",       // EXPLICIT | INFERRED
- *   "confidence":0.9,                  // number 0..1
- *   "importance":0.6,                  // number 0..1
- *   "sensitive":false,                 // optional boolean
- *   "replaces_previous":false,         // optional boolean
- *   "evidence":"I love slow-burn fantasy", // optional; the user's own words
- *   "source_message_ids":["..."]       // optional
- * }]}
- * </pre>
- *
- * The document is all-or-nothing at the top level (not JSON, or no {@code memories} array: invalid, the caller
- * retries); individual malformed items are discarded and counted.
+ * Validates the extraction LLM's structured output for the legacy {@code memories[]} shape and the v2
+ * {@code new_memories[]} items used by {@link MemoryEngineResultParser}.
  */
 public final class MemoryCandidateParser {
 
@@ -45,13 +30,19 @@ public final class MemoryCandidateParser {
 
     public static Result parse(String raw, Set<String> windowMessageIds) {
         JsonNode root = readJson(raw);
-        if (root == null || !root.isObject() || !root.has("memories") || !root.get("memories").isArray()) {
+        if (root == null || !root.isObject()) {
+            return Result.invalid();
+        }
+        JsonNode array = root.has("new_memories") && root.get("new_memories").isArray()
+                ? root.get("new_memories")
+                : root.get("memories");
+        if (array == null || !array.isArray()) {
             return Result.invalid();
         }
         List<MemoryCandidate> out = new ArrayList<>();
         int discarded = 0;
-        for (JsonNode item : root.get("memories")) {
-            MemoryCandidate c = item(item, windowMessageIds);
+        for (JsonNode item : array) {
+            MemoryCandidate c = item(item, windowMessageIds, Set.of());
             if (c == null) {
                 discarded++;
             } else {
@@ -61,13 +52,13 @@ public final class MemoryCandidateParser {
         return new Result(true, out, discarded);
     }
 
-    private static MemoryCandidate item(JsonNode n, Set<String> windowMessageIds) {
+    static MemoryCandidate item(JsonNode n, Set<String> windowMessageIds, Set<String> knownConversationIds) {
         if (n == null || !n.isObject()) {
             return null;
         }
         Category category = enumValue(Category.class, n.path("category"));
-        Classification classification = enumValue(Classification.class, n.path("classification"));
-        if (category == null || classification == null) {
+        SourceType sourceType = sourceType(n);
+        if (category == null || sourceType == null) {
             return null;
         }
         JsonNode content = n.path("content");
@@ -83,24 +74,77 @@ public final class MemoryCandidateParser {
         if (confidence == null || importance == null) {
             return null;
         }
-        boolean sensitive = n.path("sensitive").asBoolean(false);
-        boolean replaces = n.path("replaces_previous").asBoolean(false);
-        String evidence = n.path("evidence").isTextual() ? n.path("evidence").asText() : "";
-        List<String> sources = new ArrayList<>();
-        JsonNode ids = n.path("source_message_ids");
-        if (ids.isArray()) {
-            for (JsonNode id : ids) {
-                if (id.isTextual() && windowMessageIds.contains(id.asText())) {
-                    sources.add(id.asText());
+        int recurrence = n.path("recurrence").isNumber() ? Math.max(0, n.path("recurrence").asInt()) : 0;
+        Stability stability = enumValue(Stability.class, n.path("stability"));
+        if (stability == null) {
+            stability = Stability.EVOLVING;
+        }
+        boolean sensitive = n.path("sensitive").asBoolean(false)
+                || "SENSITIVE".equalsIgnoreCase(n.path("sensitivity").asText(""));
+        boolean replaces = n.path("replaces_previous").asBoolean(false)
+                || "OUTDATED".equalsIgnoreCase(n.path("status").asText(""));
+        boolean needsConfirmation = n.path("needs_confirmation").asBoolean(false);
+        List<String> evidence = stringList(n.path("evidence"));
+        if (evidence.isEmpty() && n.path("evidence").isTextual()) {
+            evidence = List.of(n.path("evidence").asText());
+        }
+        List<String> sources = filterIds(n.path("source_message_ids"), windowMessageIds);
+        List<String> convIds = filterIds(n.path("source_conversation_ids"), knownConversationIds);
+        if (knownConversationIds.isEmpty()) {
+            // historical/incremental may omit known set; keep any non-blank ids
+            convIds = stringList(n.path("source_conversation_ids"));
+        }
+        return new MemoryCandidate(
+                category,
+                text,
+                sourceType,
+                confidence,
+                importance,
+                recurrence,
+                stability,
+                sensitive,
+                replaces,
+                needsConfirmation,
+                evidence,
+                sources,
+                convIds);
+    }
+
+    private static SourceType sourceType(JsonNode n) {
+        SourceType fromSource = enumValue(SourceType.class, n.path("source_type"));
+        if (fromSource != null) {
+            return fromSource;
+        }
+        return enumValue(SourceType.class, n.path("classification"));
+    }
+
+    private static List<String> stringList(JsonNode n) {
+        List<String> out = new ArrayList<>();
+        if (n != null && n.isArray()) {
+            for (JsonNode item : n) {
+                if (item.isTextual() && !item.asText().isBlank()) {
+                    out.add(item.asText().strip());
                 }
             }
         }
-        return new MemoryCandidate(
-                category, text, classification, confidence, importance, sensitive, replaces, evidence, sources);
+        return out;
+    }
+
+    private static List<String> filterIds(JsonNode n, Set<String> allowed) {
+        List<String> out = new ArrayList<>();
+        if (n == null || !n.isArray() || allowed == null || allowed.isEmpty()) {
+            return out;
+        }
+        for (JsonNode id : n) {
+            if (id.isTextual() && allowed.contains(id.asText())) {
+                out.add(id.asText());
+            }
+        }
+        return out;
     }
 
     /** A JSON number within 0..1; strings and out-of-range numbers are schema violations. */
-    private static Double unit(JsonNode n) {
+    static Double unit(JsonNode n) {
         if (n == null || !n.isNumber()) {
             return null;
         }
@@ -108,8 +152,8 @@ public final class MemoryCandidateParser {
         return v < 0 || v > 1 || Double.isNaN(v) ? null : v;
     }
 
-    private static <E extends Enum<E>> E enumValue(Class<E> type, JsonNode n) {
-        if (!n.isTextual()) {
+    static <E extends Enum<E>> E enumValue(Class<E> type, JsonNode n) {
+        if (n == null || !n.isTextual()) {
             return null;
         }
         try {
@@ -120,7 +164,7 @@ public final class MemoryCandidateParser {
     }
 
     /** Tolerates a ```json fence or chatter around the object. */
-    private static JsonNode readJson(String raw) {
+    static JsonNode readJson(String raw) {
         if (raw == null) {
             return null;
         }

@@ -5,7 +5,7 @@ import com.bookbuddy.embedding.VectorMath;
 import com.bookbuddy.jobs.JobHandler;
 import com.bookbuddy.jobs.JobQueueDocument;
 import com.bookbuddy.jobs.JobQueueDocument.Type;
-import com.bookbuddy.memory.MemoryDocument.Classification;
+import com.bookbuddy.memory.MemoryDocument.SourceType;
 import com.bookbuddy.memory.MemoryDocument.Status;
 import com.bookbuddy.quota.LlmBudgetService;
 import com.bookbuddy.quota.LlmBudgetService.Priority;
@@ -86,7 +86,7 @@ public class MemoryConsolidationService implements JobHandler {
                 }
                 MemoryDocument keep = better(a, b);
                 MemoryDocument drop = keep == a ? b : a;
-                if (drop.isPinned() || drop.isUserVerified()) {
+                if (drop.isPinned() || drop.isUserConfirmed() || drop.isStated()) {
                     continue; // never archive what the user shaped
                 }
                 drop.setStatus(Status.ARCHIVED);
@@ -121,6 +121,8 @@ public class MemoryConsolidationService implements JobHandler {
     }
 
     private static int score(MemoryDocument m) {
-        return (m.isPinned() ? 4 : 0) + (m.isUserVerified() ? 2 : 0) + (m.getClassification() == Classification.EXPLICIT ? 1 : 0);
+        return (m.isPinned() ? 4 : 0)
+                + (m.isUserConfirmed() ? 2 : 0)
+                + (m.getSourceType() == SourceType.EXPLICIT ? 1 : 0);
     }
 }

@@ -1,11 +1,13 @@
 package com.bookbuddy.memory;
 
 import com.bookbuddy.memory.MemoryDocument.Category;
-import com.bookbuddy.memory.MemoryDocument.Classification;
+import com.bookbuddy.memory.MemoryDocument.SourceType;
+import com.bookbuddy.memory.MemoryDocument.Stability;
 import com.bookbuddy.memory.MemoryDocument.Status;
 import java.text.Normalizer;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 
@@ -20,6 +22,9 @@ public final class MemoryPolicy {
     /** Candidates the model itself is unsure about are not worth keeping. */
     public static final double MIN_CANDIDATE_CONFIDENCE = 0.4;
 
+    /** High-impact inferences above this importance get a soft confirmation flag. */
+    public static final double HIGH_IMPACT_IMPORTANCE = 0.75;
+
     public static final int MAX_CONTENT_CHARS = 300;
     public static final int MIN_CONTENT_CHARS = 3;
 
@@ -31,10 +36,9 @@ public final class MemoryPolicy {
      * Applies the safety rules to a validated candidate.
      *
      * <ul>
-     *   <li>An EXPLICIT claim must be backed by {@code evidence} that really occurs in the user's own messages;
+     *   <li>An EXPLICIT claim must be backed by evidence that really occurs in the user's own messages;
      *       otherwise it is downgraded to INFERRED.
-     *   <li>Sensitive content (model flag or {@link SensitiveTopics}) is dropped unless EXPLICIT, and is then
-     *       flagged sensitive. Sensitive categories are never inferred.
+     *   <li>Sensitive content is dropped unless EXPLICIT, and is then flagged sensitive.
      *   <li>INFERRED confidence is capped at {@link #INFERRED_CONFIDENCE_CAP}.
      * </ul>
      *
@@ -46,24 +50,63 @@ public final class MemoryPolicy {
         if (content.length() < MIN_CONTENT_CHARS) {
             return Optional.empty();
         }
-        Classification classification = c.classification();
-        if (classification == Classification.EXPLICIT && !evidenceFound(c.evidence(), userText)) {
-            classification = Classification.INFERRED;
+        SourceType sourceType = c.sourceType();
+        if (sourceType == SourceType.USER_CONFIRMED) {
+            // Engine may not invent confirmation; treat as inferred until the user confirms via API.
+            sourceType = SourceType.INFERRED;
         }
-        boolean sensitive = c.sensitive() || SensitiveTopics.isSensitive(content) || SensitiveTopics.isSensitive(c.evidence());
-        if (sensitive && classification != Classification.EXPLICIT) {
+        if (sourceType == SourceType.EXPLICIT && !anyEvidenceFound(c.evidence(), userText)) {
+            sourceType = SourceType.INFERRED;
+        }
+        boolean sensitive = c.sensitive()
+                || SensitiveTopics.isSensitive(content)
+                || c.evidence().stream().anyMatch(SensitiveTopics::isSensitive);
+        if (sensitive && sourceType != SourceType.EXPLICIT) {
             return Optional.empty();
         }
         double confidence = clamp01(c.confidence());
-        if (classification == Classification.INFERRED) {
+        if (sourceType == SourceType.INFERRED) {
             confidence = Math.min(confidence, INFERRED_CONFIDENCE_CAP);
         }
         if (confidence < MIN_CANDIDATE_CONFIDENCE) {
             return Optional.empty();
         }
+        double importance = clamp01(c.importance());
+        boolean needsConfirmation = sourceType == SourceType.INFERRED
+                && (c.needsConfirmation() || importance >= HIGH_IMPACT_IMPORTANCE);
+        Stability stability = c.stability() == null ? Stability.EVOLVING : c.stability();
+        if (stability == Stability.TEMPORARY || c.category() == Category.EMOTIONAL_CONTEXT) {
+            // temporary emotional notes stay temporary
+            if (c.category() == Category.EMOTIONAL_CONTEXT && stability == Stability.STABLE) {
+                stability = Stability.TEMPORARY;
+            }
+        }
         return Optional.of(new MemoryCandidate(
-                c.category(), content, classification, confidence, clamp01(c.importance()), sensitive,
-                c.replacesPrevious(), c.evidence(), c.sourceMessageIds()));
+                c.category(),
+                content,
+                sourceType,
+                confidence,
+                importance,
+                Math.max(0, c.recurrence()),
+                stability,
+                sensitive,
+                c.replacesPrevious(),
+                needsConfirmation,
+                c.evidence(),
+                c.sourceMessageIds(),
+                c.sourceConversationIds()));
+    }
+
+    public static boolean anyEvidenceFound(List<String> evidence, String userText) {
+        if (evidence == null || evidence.isEmpty()) {
+            return false;
+        }
+        for (String e : evidence) {
+            if (evidenceFound(e, userText)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** True when {@code evidence} (a quote of the user's words) appears in {@code userText}, ignoring case and spacing. */
@@ -79,9 +122,17 @@ public final class MemoryPolicy {
     // Expiry
     // ---------------------------------------------------------------------------------------------------------
 
-    /** EMOTIONAL_CONTEXT fades after {@code days} unless pinned; everything else never expires on its own. */
-    public static Instant defaultExpiry(Category category, boolean pinned, Instant from, int days) {
-        if (category != Category.EMOTIONAL_CONTEXT || pinned) {
+    /**
+     * EMOTIONAL_CONTEXT and TEMPORARY memories fade after {@code days} unless pinned;
+     * everything else never expires on its own.
+     */
+    public static Instant defaultExpiry(
+            Category category, Stability stability, boolean pinned, Instant from, int days) {
+        if (pinned) {
+            return null;
+        }
+        boolean fades = category == Category.EMOTIONAL_CONTEXT || stability == Stability.TEMPORARY;
+        if (!fades) {
             return null;
         }
         return from.plus(Duration.ofDays(days));

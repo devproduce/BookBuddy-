@@ -181,8 +181,12 @@ public class MemoryExtractionService implements JobHandler {
     /** When a conversation is deleted, memories it produced keep existing but forget where they came from. */
     public void onConversationDeleted(String userId, String conversationId) {
         try {
-            for (MemoryDocument m : memories.findByUserIdAndSourceConversationId(userId, conversationId)) {
-                m.setSourceConversationId(null);
+            for (MemoryDocument m : memories.findByUserIdAndSourceConversationIdsContaining(userId, conversationId)) {
+                List<String> convIds = m.getSourceConversationIds() == null
+                        ? new ArrayList<>()
+                        : new ArrayList<>(m.getSourceConversationIds());
+                convIds.remove(conversationId);
+                m.setSourceConversationIds(convIds);
                 m.setSourceMessageIds(new ArrayList<>());
                 memories.save(m);
             }

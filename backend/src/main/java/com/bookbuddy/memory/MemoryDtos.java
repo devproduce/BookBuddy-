@@ -2,8 +2,9 @@ package com.bookbuddy.memory;
 
 import com.bookbuddy.jobs.JobQueueDocument;
 import com.bookbuddy.memory.MemoryDocument.Category;
-import com.bookbuddy.memory.MemoryDocument.Classification;
 import com.bookbuddy.memory.MemoryDocument.Sensitivity;
+import com.bookbuddy.memory.MemoryDocument.SourceType;
+import com.bookbuddy.memory.MemoryDocument.Stability;
 import com.bookbuddy.memory.MemoryDocument.Status;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -20,15 +21,18 @@ public final class MemoryDtos {
             String id,
             Category category,
             String content,
-            Classification classification,
+            SourceType sourceType,
             double confidence,
             double importance,
+            int recurrence,
+            Stability stability,
             Sensitivity sensitivity,
-            boolean userVerified,
+            boolean needsConfirmation,
             boolean pinned,
             Status status,
             String supersededBy,
-            String sourceConversationId,
+            List<String> sourceConversationIds,
+            List<String> evidence,
             Instant expiresAt,
             Instant createdAt,
             Instant updatedAt,
@@ -39,21 +43,78 @@ public final class MemoryDtos {
                     ? Status.EXPIRED
                     : m.getStatus();
             return new MemoryResponse(
-                    m.getId(), m.getCategory(), m.getContent(), m.getClassification(), m.getConfidence(),
-                    m.getImportance(), m.getSensitivity(), m.isUserVerified(), m.isPinned(), effective,
-                    m.getSupersededBy(), m.getSourceConversationId(), m.getExpiresAt(), m.getCreatedAt(),
-                    m.getUpdatedAt(), m.getLastUsedAt());
+                    m.getId(),
+                    m.getCategory(),
+                    m.getContent(),
+                    m.getSourceType(),
+                    m.getConfidence(),
+                    m.getImportance(),
+                    m.getRecurrence(),
+                    m.getStability() == null ? Stability.EVOLVING : m.getStability(),
+                    m.getSensitivity(),
+                    m.isNeedsConfirmation(),
+                    m.isPinned(),
+                    effective,
+                    m.getSupersededBy(),
+                    m.getSourceConversationIds() == null ? List.of() : List.copyOf(m.getSourceConversationIds()),
+                    m.getEvidence() == null ? List.of() : List.copyOf(m.getEvidence()),
+                    m.getExpiresAt(),
+                    m.getCreatedAt(),
+                    m.getUpdatedAt(),
+                    m.getLastUsedAt());
         }
     }
 
     public record CreateMemoryRequest(
             @NotNull Category category, @NotBlank @Size(max = 300) String content, Boolean pinned) {}
 
-    /** Every field is optional; only the ones present are changed. Editing the content marks it user-verified. */
+    /** Every field is optional; only the ones present are changed. Editing the content marks it USER_CONFIRMED. */
     public record UpdateMemoryRequest(
             Category category, @Size(min = 1, max = 300) String content, Boolean pinned, Boolean sensitive) {}
 
-    public record ProfileResponse(String text, int estimatedTokens, int tokenBudget, List<MemoryResponse> items) {}
+    public record ProfileResponse(
+            String text,
+            String profileSummary,
+            int estimatedTokens,
+            int tokenBudget,
+            List<MemoryResponse> items,
+            InteractionContextDto interactionContext) {}
+
+    public record InteractionContextDto(
+            String preferredTone,
+            String preferredDetailLevel,
+            List<String> communicationStyle,
+            List<String> emotionalSupportPreferences,
+            List<String> advicePreferences,
+            List<String> personalizationGuidelines,
+            String followUpQuestionPreference) {
+
+        public static InteractionContextDto from(UserProfileDocument.InteractionContext c) {
+            if (c == null) {
+                return empty();
+            }
+            return new InteractionContextDto(
+                    nullToEmpty(c.getPreferredTone()),
+                    nullToEmpty(c.getPreferredDetailLevel()),
+                    copy(c.getCommunicationStyle()),
+                    copy(c.getEmotionalSupportPreferences()),
+                    copy(c.getAdvicePreferences()),
+                    copy(c.getPersonalizationGuidelines()),
+                    nullToEmpty(c.getFollowUpQuestionPreference()));
+        }
+
+        public static InteractionContextDto empty() {
+            return new InteractionContextDto("", "", List.of(), List.of(), List.of(), List.of(), "");
+        }
+
+        private static String nullToEmpty(String s) {
+            return s == null ? "" : s;
+        }
+
+        private static List<String> copy(List<String> list) {
+            return list == null ? List.of() : List.copyOf(list);
+        }
+    }
 
     public record JobResponse(
             String jobId,
