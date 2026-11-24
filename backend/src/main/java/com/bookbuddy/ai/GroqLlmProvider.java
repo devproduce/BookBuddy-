@@ -53,13 +53,19 @@ public class GroqLlmProvider implements LlmProvider {
 
     @Override
     public String complete(String systemPrompt, String userPrompt) {
+        return complete(systemPrompt, userPrompt, 900);
+    }
+
+    @Override
+    public String complete(String systemPrompt, String userPrompt, int maxTokens) {
         if (!isConfigured()) {
             throw new LlmException("Groq API key is not configured");
         }
+        int tokens = maxTokens > 0 ? maxTokens : 900;
         Map<String, Object> body = Map.of(
                 "model", config.defaultModel(),
                 "temperature", 0.2,
-                "max_tokens", 900,
+                "max_tokens", tokens,
                 "messages", List.of(
                         Map.of("role", "system", "content", systemPrompt),
                         Map.of("role", "user", "content", userPrompt)));

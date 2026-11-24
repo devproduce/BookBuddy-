@@ -16,6 +16,14 @@ public interface LlmProvider {
     String complete(String systemPrompt, String userPrompt);
 
     /**
+     * Single-turn completion with an explicit output token budget (used by the memory engine).
+     * Default falls back to {@link #complete(String, String)}.
+     */
+    default String complete(String systemPrompt, String userPrompt, int maxTokens) {
+        return complete(systemPrompt, userPrompt);
+    }
+
+    /**
      * Streams a chat completion, invoking {@code onToken} for every text delta on the calling thread's behalf (the
      * call blocks until the stream ends). Cancelling {@code cancel} stops the upstream request as soon as possible
      * and makes this method return a {@link StreamResult} with {@code cancelled == true}.
