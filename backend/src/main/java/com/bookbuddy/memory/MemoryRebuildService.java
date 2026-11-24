@@ -9,12 +9,10 @@ import com.bookbuddy.conversation.MessageDocument;
 import com.bookbuddy.conversation.MessageDocument.Role;
 import com.bookbuddy.conversation.MessageDocument.Status;
 import com.bookbuddy.conversation.MessageRepository;
-import com.bookbuddy.embedding.EmbeddingProvider;
 import com.bookbuddy.jobs.JobHandler;
 import com.bookbuddy.jobs.JobQueueDocument;
 import com.bookbuddy.jobs.JobQueueDocument.Type;
-import com.bookbuddy.memory.MemoryMerger.Action;
-import com.bookbuddy.memory.MemoryMerger.Outcome;
+import com.bookbuddy.memory.MemoryDocument.SourceType;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -27,12 +25,10 @@ import org.springframework.data.domain.Limit;
 import org.springframework.stereotype.Service;
 
 /**
- * Re-derives the automatically learned memories from the user's (non-incognito) conversations.
+ * Re-derives automatically learned memories from the user's (non-incognito) conversations via HISTORICAL_ANALYSIS.
  *
- * <p>Write-then-swap: every LLM call happens first and candidates are held in memory; only when all of them succeeded
- * are the new memories written, and only after that are the memories they replace removed. An LLM failure (or a
- * deferral because the budget is low) therefore changes nothing. Memories the user touched (verified, edited, pinned,
- * added by hand) are never replaced, and neither are memories whose source conversation was not re-read.
+ * <p>Pinned / EXPLICIT / USER_CONFIRMED memories are preserved. Incompatible auto memories from processed
+ * conversations are replaced after a successful full run (write-then-swap via {@link MemoryApplyService}).
  */
 @Service
 public class MemoryRebuildService implements JobHandler {
@@ -46,11 +42,9 @@ public class MemoryRebuildService implements JobHandler {
     private final ConversationRepository conversations;
     private final MessageRepository messages;
     private final MemoryRepository memories;
-    private final MemoryExtractor extractor;
+    private final MemoryEngineClient engine;
+    private final MemoryApplyService apply;
     private final MemoryExtractionService extraction;
-    private final MemoryMerger merger;
-    private final MemoryWriter writer;
-    private final EmbeddingProvider embeddings;
     private final LlmProvider llm;
     private final MemoryProperties props;
 
@@ -59,22 +53,18 @@ public class MemoryRebuildService implements JobHandler {
             ConversationRepository conversations,
             MessageRepository messages,
             MemoryRepository memories,
-            MemoryExtractor extractor,
+            MemoryEngineClient engine,
+            MemoryApplyService apply,
             MemoryExtractionService extraction,
-            MemoryMerger merger,
-            MemoryWriter writer,
-            EmbeddingProvider embeddings,
             LlmProvider llm,
             MemoryProperties props) {
         this.users = users;
         this.conversations = conversations;
         this.messages = messages;
         this.memories = memories;
-        this.extractor = extractor;
+        this.engine = engine;
+        this.apply = apply;
         this.extraction = extraction;
-        this.merger = merger;
-        this.writer = writer;
-        this.embeddings = embeddings;
         this.llm = llm;
         this.props = props;
     }
@@ -101,21 +91,40 @@ public class MemoryRebuildService implements JobHandler {
             throw new PermanentJobException("language model unavailable");
         }
 
-        // ---- 1. read everything, ask the model (no writes yet) ------------------------------------------------
         List<ConversationDocument> convs = new ArrayList<>();
-        for (ConversationDocument c : conversations.findByUserIdOrderByUpdatedAtDescIdDesc(userId, Limit.of(MAX_CONVERSATIONS))) {
+        for (ConversationDocument c :
+                conversations.findByUserIdOrderByUpdatedAtDescIdDesc(userId, Limit.of(MAX_CONVERSATIONS))) {
             if (!c.isIncognito()) {
                 convs.add(c);
             }
         }
-        Collections.reverse(convs); // oldest first, so a later correction can supersede an earlier statement
+        Collections.reverse(convs);
 
-        record Found(String conversationId, MemoryCandidate candidate) {}
-        List<Found> found = new ArrayList<>();
+        // Drop replaceable auto memories from old schema / prior auto extracts before historical rebuild
+        List<MemoryDocument> existing =
+                memories.findByUserIdAndStatusOrderByUpdatedAtDesc(userId, MemoryDocument.Status.ACTIVE);
+        List<MemoryDocument> keep = new ArrayList<>();
+        List<MemoryDocument> replaceable = new ArrayList<>();
+        for (MemoryDocument m : existing) {
+            boolean protectedMem = m.isPinned()
+                    || m.isUserConfirmed()
+                    || m.getSourceType() == SourceType.EXPLICIT;
+            if (protectedMem) {
+                keep.add(m);
+            } else {
+                replaceable.add(m);
+            }
+        }
+
+        List<MemoryDocument> draft = new ArrayList<>(keep);
         Set<String> processed = new HashSet<>();
         int calls = 0;
+        int batches = 0;
+        MemoryApplyService.ApplyResult last = null;
+
         outer:
-        for (ConversationDocument c : convs) {
+        for (int ci = 0; ci < convs.size(); ci++) {
+            ConversationDocument c = convs.get(ci);
             List<MessageDocument> all = completeMessages(c);
             for (int from = 0; from < all.size(); from += WINDOW) {
                 List<MessageDocument> window = all.subList(from, Math.min(all.size(), from + WINDOW));
@@ -123,59 +132,60 @@ public class MemoryRebuildService implements JobHandler {
                     continue;
                 }
                 if (calls >= props.maxRebuildCalls()) {
-                    break outer; // out of allowance: this conversation counts as not re-read
+                    break outer;
                 }
                 calls++;
-                for (MemoryCandidate cand : extractor.extract(userId, window)) {
-                    found.add(new Found(c.getId(), cand));
-                }
+                batches++;
+                boolean finalize = ci == convs.size() - 1 && from + WINDOW >= all.size();
+                MemoryEngineResult result = engine.analyzeHistorical(
+                        userId, window, Set.of(c.getId()), draft, finalize);
+                last = apply.apply(userId, c.getId(), result);
+                draft = memories.findByUserIdAndStatusOrderByUpdatedAtDesc(userId, MemoryDocument.Status.ACTIVE);
             }
-            processed.add(c.getId()); // reached only when every window of this conversation was read
+            processed.add(c.getId());
         }
 
-        // ---- 2. merge into what must be kept ------------------------------------------------------------------
-        Instant now = Instant.now();
-        List<MemoryDocument> existing = memories.findByUserIdAndStatusOrderByUpdatedAtDesc(userId, MemoryDocument.Status.ACTIVE);
-        List<MemoryDocument> replaceable = new ArrayList<>();
-        List<MemoryDocument> working = new ArrayList<>();
-        for (MemoryDocument m : existing) {
-            boolean auto = !m.isUserConfirmed() && !m.isPinned() && m.getSourceType() != MemoryDocument.SourceType.EXPLICIT;
-            boolean fromProcessed = m.getSourceConversationIds() != null
-                    && m.getSourceConversationIds().stream().anyMatch(processed::contains);
-            if (auto && fromProcessed) {
-                replaceable.add(m);
-            } else {
-                working.add(m);
-            }
-        }
-        if (found.isEmpty() && !replaceable.isEmpty()) {
-            // the model found nothing: that is far more likely a bad run than an empty person; keep what we have
-            return "no changes: nothing new found, kept " + replaceable.size() + " existing";
-        }
-        List<Outcome> outcomes = new ArrayList<>();
-        for (Found f : found) {
-            float[] embedding = embeddings.embedPassage(f.candidate().content());
-            outcomes.add(merger.merge(f.candidate(), userId, f.conversationId(), embedding, working, now));
+        if (batches == 0) {
+            return "no changes: nothing to analyze";
         }
 
-        // ---- 3. write the new generation, then swap out the old one ------------------------------------------
-        writer.persist(outcomes);
-        memories.deleteAll(replaceable);
+        // After successful historical runs, remove leftover replaceable memories that were never touched
+        Set<String> draftIds = new HashSet<>();
+        for (MemoryDocument m : draft) {
+            draftIds.add(m.getId());
+        }
+        List<MemoryDocument> stillReplaceable = new ArrayList<>();
+        for (MemoryDocument m : replaceable) {
+            if (!draftIds.contains(m.getId())) {
+                stillReplaceable.add(m);
+            }
+        }
+        if (!stillReplaceable.isEmpty()) {
+            memories.deleteAll(stillReplaceable);
+        }
+
         for (ConversationDocument c : convs) {
             if (processed.contains(c.getId())) {
                 extraction.markExtracted(c, null);
             }
         }
 
-        long added = outcomes.stream().filter(o -> o.action() == Action.ADD || o.action() == Action.SUPERSEDE).count();
+        // Final consolidation pass for profile polish when we have many memories
+        if (draft.size() > 20 && calls < props.maxRebuildCalls()) {
+            MemoryEngineResult cons = engine.consolidate(userId, draft);
+            apply.apply(userId, null, cons);
+        }
+
         log.info("Memory rebuild finished: {} conversations, {} LLM calls", processed.size(), calls);
-        return "rebuilt from " + processed.size() + " conversations: " + added + " memories, replaced "
-                + replaceable.size();
+        String applied = last == null ? "n/a" : last.summary();
+        return "rebuilt from " + processed.size() + " conversations (" + calls + " calls): " + applied
+                + ", removed " + stillReplaceable.size() + " stale auto memories";
     }
 
     private List<MessageDocument> completeMessages(ConversationDocument c) {
         List<MessageDocument> out = new ArrayList<>();
-        for (MessageDocument m : messages.findByConversationIdAndUserIdOrderByCreatedAtAscIdAsc(c.getId(), c.getUserId())) {
+        for (MessageDocument m :
+                messages.findByConversationIdAndUserIdOrderByCreatedAtAscIdAsc(c.getId(), c.getUserId())) {
             if (m.getStatus() == Status.COMPLETE && (m.getRole() == Role.USER || m.getRole() == Role.ASSISTANT)) {
                 out.add(m);
             }

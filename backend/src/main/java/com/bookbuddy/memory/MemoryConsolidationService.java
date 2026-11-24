@@ -17,9 +17,8 @@ import java.util.Set;
 import org.springframework.stereotype.Service;
 
 /**
- * Lowest-priority housekeeping: archives near-identical active memories (keeping the more trustworthy one) so the
- * prompt budget is not wasted on repeats. It uses embeddings only and never rewrites or deletes content; an archived
- * memory points at its survivor through {@code supersededBy}. Memories the user pinned or verified are never archived.
+ * Housekeeping: embedding pre-cluster near-duplicates, then LLM CONSOLIDATION to synthesize / mark outdated and
+ * refresh the persisted profile. Never archives pinned or stated memories.
  */
 @Service
 public class MemoryConsolidationService implements JobHandler {
@@ -30,11 +29,23 @@ public class MemoryConsolidationService implements JobHandler {
     private final MemoryRepository memories;
     private final EmbeddingProvider embeddings;
     private final LlmBudgetService budget;
+    private final MemoryEngineClient engine;
+    private final MemoryApplyService apply;
+    private final com.bookbuddy.ai.LlmProvider llm;
 
-    public MemoryConsolidationService(MemoryRepository memories, EmbeddingProvider embeddings, LlmBudgetService budget) {
+    public MemoryConsolidationService(
+            MemoryRepository memories,
+            EmbeddingProvider embeddings,
+            LlmBudgetService budget,
+            MemoryEngineClient engine,
+            MemoryApplyService apply,
+            com.bookbuddy.ai.LlmProvider llm) {
         this.memories = memories;
         this.embeddings = embeddings;
         this.budget = budget;
+        this.engine = engine;
+        this.apply = apply;
+        this.llm = llm;
     }
 
     @Override
@@ -47,23 +58,35 @@ public class MemoryConsolidationService implements JobHandler {
         if (!budget.allows(Priority.CONSOLIDATION)) {
             throw new BudgetDeferredException("LLM budget low");
         }
-        return "archived " + consolidate(job.getUserId()) + " duplicates";
-    }
-
-    /** @return how many memories were archived */
-    public int consolidate(String userId) {
-        Instant now = Instant.now();
-        List<MemoryDocument> usable = new ArrayList<>();
-        for (MemoryDocument m : memories.findByUserIdAndStatusOrderByUpdatedAtDesc(userId, Status.ACTIVE)) {
-            if (MemoryPolicy.isUsable(m, now)) {
-                usable.add(m);
+        int archived = consolidateEmbeddingOnly(job.getUserId());
+        String llmPart = "skipped";
+        if (llm.isConfigured()) {
+            List<MemoryDocument> usable = usable(job.getUserId());
+            if (usable.size() >= 2) {
+                MemoryEngineResult result = engine.consolidate(job.getUserId(), usable);
+                MemoryApplyService.ApplyResult applied = apply.apply(job.getUserId(), null, result);
+                llmPart = applied.summary();
+            } else {
+                llmPart = "too few memories";
             }
         }
+        return "archived " + archived + " embedding-duplicates; llm: " + llmPart;
+    }
+
+    /** @return how many memories were archived by embedding near-duplicate pass */
+    public int consolidate(String userId) {
+        return consolidateEmbeddingOnly(userId);
+    }
+
+    int consolidateEmbeddingOnly(String userId) {
+        Instant now = Instant.now();
+        List<MemoryDocument> usable = usable(userId);
         double bar = embeddings.isSemantic() ? SEMANTIC_NEAR_DUPLICATE : LEXICAL_NEAR_DUPLICATE;
         float[][] vectors = new float[usable.size()][];
         for (int i = 0; i < usable.size(); i++) {
             MemoryDocument m = usable.get(i);
-            vectors[i] = embeddings.modelName().equals(m.getEmbeddingModel()) && m.getEmbedding() != null
+            vectors[i] = embeddings.modelName().equals(m.getEmbeddingModel())
+                            && m.getEmbedding() != null
                             && !m.getEmbedding().isEmpty()
                     ? VectorMath.toArray(m.getEmbedding())
                     : embeddings.embedPassage(m.getContent());
@@ -87,7 +110,7 @@ public class MemoryConsolidationService implements JobHandler {
                 MemoryDocument keep = better(a, b);
                 MemoryDocument drop = keep == a ? b : a;
                 if (drop.isPinned() || drop.isUserConfirmed() || drop.isStated()) {
-                    continue; // never archive what the user shaped
+                    continue;
                 }
                 drop.setStatus(Status.ARCHIVED);
                 drop.setSupersededBy(keep.getId());
@@ -103,6 +126,17 @@ public class MemoryConsolidationService implements JobHandler {
             memories.save(m);
         }
         return toSave.size();
+    }
+
+    private List<MemoryDocument> usable(String userId) {
+        Instant now = Instant.now();
+        List<MemoryDocument> usable = new ArrayList<>();
+        for (MemoryDocument m : memories.findByUserIdAndStatusOrderByUpdatedAtDesc(userId, Status.ACTIVE)) {
+            if (MemoryPolicy.isUsable(m, now)) {
+                usable.add(m);
+            }
+        }
+        return usable;
     }
 
     /** Stated beats inferred, verified/pinned beats not, then higher importance, then the more recently touched. */

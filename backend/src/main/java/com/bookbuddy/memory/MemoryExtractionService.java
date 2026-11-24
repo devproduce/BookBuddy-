@@ -13,11 +13,11 @@ import com.bookbuddy.jobs.JobHandler;
 import com.bookbuddy.jobs.JobQueueDocument;
 import com.bookbuddy.jobs.JobQueueDocument.Type;
 import com.bookbuddy.jobs.JobQueueService;
-import com.bookbuddy.memory.MemoryMerger.Outcome;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -72,9 +72,8 @@ public class MemoryExtractionService implements JobHandler {
     private final ConversationRepository conversations;
     private final MessageRepository messages;
     private final MemoryRepository memories;
-    private final MemoryExtractor extractor;
-    private final MemoryMerger merger;
-    private final MemoryWriter writer;
+    private final MemoryEngineClient engine;
+    private final MemoryApplyService apply;
     private final com.bookbuddy.embedding.EmbeddingProvider embeddings;
     private final JobQueueService jobs;
     private final LlmProvider llm;
@@ -87,9 +86,8 @@ public class MemoryExtractionService implements JobHandler {
             ConversationRepository conversations,
             MessageRepository messages,
             MemoryRepository memories,
-            MemoryExtractor extractor,
-            MemoryMerger merger,
-            MemoryWriter writer,
+            MemoryEngineClient engine,
+            MemoryApplyService apply,
             com.bookbuddy.embedding.EmbeddingProvider embeddings,
             JobQueueService jobs,
             LlmProvider llm,
@@ -100,9 +98,8 @@ public class MemoryExtractionService implements JobHandler {
         this.conversations = conversations;
         this.messages = messages;
         this.memories = memories;
-        this.extractor = extractor;
-        this.merger = merger;
-        this.writer = writer;
+        this.engine = engine;
+        this.apply = apply;
         this.embeddings = embeddings;
         this.jobs = jobs;
         this.llm = llm;
@@ -244,7 +241,10 @@ public class MemoryExtractionService implements JobHandler {
         }
 
         // LLM first, writes later: a failure here leaves every memory exactly as it was
-        List<MemoryCandidate> candidates = extractor.extract(userId, window);
+        List<MemoryDocument> existing = topSimilar(
+                memories.findByUserIdAndStatusOrderByUpdatedAtDesc(userId, MemoryDocument.Status.ACTIVE),
+                window);
+        MemoryEngineResult engineResult = engine.analyzeIncremental(userId, conversationId, window, existing);
 
         // the world may have changed while the model was thinking
         user = users.findById(userId).orElse(null);
@@ -253,30 +253,55 @@ public class MemoryExtractionService implements JobHandler {
             return Result.skipped("conversation changed");
         }
 
-        Instant now = Instant.now();
-        List<MemoryDocument> working = new ArrayList<>(memories.findByUserIdAndStatusOrderByUpdatedAtDesc(
-                userId, MemoryDocument.Status.ACTIVE));
-        List<Outcome> outcomes = new ArrayList<>();
-        for (MemoryCandidate c : candidates) {
-            float[] embedding = embeddings.embedPassage(c.content());
-            outcomes.add(merger.merge(c, userId, conversationId, embedding, working, now));
-        }
-        writer.persist(outcomes);
+        MemoryApplyService.ApplyResult applied = apply.apply(userId, conversationId, engineResult);
         markExtracted(fresh, window);
 
-        int[] counts = new int[MemoryMerger.Action.values().length];
-        for (Outcome o : outcomes) {
-            counts[o.action().ordinal()]++;
-        }
-        if (working.size() > props.consolidateAbove()) {
+        long active = memories.countByUserIdAndStatus(userId, MemoryDocument.Status.ACTIVE);
+        if (active > props.consolidateAbove()) {
             jobs.enqueue(Type.MEMORY_CONSOLIDATION, userId, Map.of(), "memory-consolidate:" + userId);
         }
-        return new Result(false, null,
-                counts[MemoryMerger.Action.ADD.ordinal()],
-                counts[MemoryMerger.Action.UPDATE.ordinal()],
-                counts[MemoryMerger.Action.MERGE.ordinal()],
-                counts[MemoryMerger.Action.SUPERSEDE.ordinal()],
-                counts[MemoryMerger.Action.IGNORE.ordinal()]);
+        return new Result(
+                false,
+                null,
+                applied.added(),
+                applied.updated(),
+                applied.merged(),
+                applied.superseded(),
+                applied.ignored());
+    }
+
+    /** Prefilter existing memories most related to the new window (embedding similarity). */
+    private List<MemoryDocument> topSimilar(List<MemoryDocument> active, List<MessageDocument> window) {
+        StringBuilder text = new StringBuilder();
+        for (MessageDocument m : window) {
+            if (m.getRole() == Role.USER && m.getContent() != null) {
+                text.append(m.getContent()).append('\n');
+            }
+        }
+        if (text.length() == 0 || active.isEmpty()) {
+            return active.stream().limit(40).toList();
+        }
+        float[] query = embeddings.embedQuery(text.toString());
+        record Scored(MemoryDocument m, double s) {}
+        List<Scored> scored = new ArrayList<>();
+        for (MemoryDocument m : active) {
+            if (!MemoryPolicy.isUsable(m, Instant.now())) {
+                continue;
+            }
+            double sim = m.getEmbedding() != null && !m.getEmbedding().isEmpty()
+                    ? com.bookbuddy.embedding.VectorMath.cosine(query, m.getEmbedding())
+                    : 0;
+            scored.add(new Scored(m, sim));
+        }
+        scored.sort(Comparator.comparingDouble(Scored::s).reversed());
+        List<MemoryDocument> out = new ArrayList<>();
+        for (Scored s : scored) {
+            out.add(s.m());
+            if (out.size() >= 40) {
+                break;
+            }
+        }
+        return out;
     }
 
     /** Complete USER/ASSISTANT messages newer than the last extraction, oldest first, at most 30. */
