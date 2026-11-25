@@ -222,6 +222,12 @@ svg {
     animation-delay: 0ms !important;
     transition-duration: 0.01ms !important;
   }
+  .splash__mark::after,
+  .splash .brand-mark {
+    animation: none !important;
+    opacity: 1;
+    transform: none;
+  }
 }
 
 /* ---------- brand ---------- */
@@ -903,6 +909,12 @@ select option {
   align-content: center;
   padding: clamp(0.5rem, 2vw, 1.5rem) 0 clamp(1rem, 3vw, 2rem);
 }
+.hero .eyebrow {
+  animation: rise var(--duration-slow) var(--ease) both;
+}
+.hero .brand-hero {
+  animation: rise var(--duration-slow) var(--stagger) var(--ease) both;
+}
 .hero .brand-hero__name {
   font-size: clamp(3.4rem, 10vw, 6.8rem);
 }
@@ -911,6 +923,17 @@ select option {
   flex-wrap: wrap;
   gap: 0.85rem;
   margin-top: 0.35rem;
+  animation: rise var(--duration-slow) calc(var(--stagger) * 2) var(--ease) both;
+}
+@media (max-width: 820px) {
+  .hero {
+    min-height: min(58vh, 28rem);
+  }
+  .shell__main:has(.chat),
+  .shell__main:has(.consent) {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
 }
 .home__recent {
   display: grid;
@@ -1485,6 +1508,11 @@ textarea:focus {
 .page:has(> .chat),
 .page:has(> .consent) {
   max-width: 1180px;
+}
+.shell__main:has(.chat),
+.shell__main:has(.consent) {
+  padding-top: clamp(1rem, 2.5vw, 1.75rem);
+  padding-bottom: clamp(1rem, 2.5vw, 1.75rem);
 }
 
 .chat {
@@ -2312,14 +2340,29 @@ textarea:focus {
   .chat__scroll {
     padding: 0.9rem;
   }
+  .chat__scroll--new {
+    padding-top: 0.75rem;
+  }
   .msg__bubble {
     max-width: 96%;
+  }
+  .msg--assistant .msg__bubble {
+    padding-left: 0.85rem;
   }
   .composer {
     padding: 0.6rem 0.9rem 0.4rem;
   }
+  .newchat__title {
+    max-width: none;
+  }
+  .passage {
+    width: min(100%, 100%);
+  }
   .contacts__row {
     grid-template-columns: 1fr;
+  }
+  .home__recent {
+    max-width: none;
   }
 }
 
