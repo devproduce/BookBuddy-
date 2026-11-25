@@ -1491,39 +1491,42 @@ textarea:focus {
   --chat-h: calc(100dvh - clamp(3rem, 8vw, 7rem));
   position: relative;
   display: grid;
-  grid-template-columns: 290px minmax(0, 1fr);
-  gap: 1.25rem;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 0;
   height: var(--chat-h);
   min-height: 480px;
+  border-top: 1px solid var(--border);
 }
 .chat__list,
 .chat__main {
   min-height: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-  box-shadow: var(--shadow);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 .chat__list {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  padding: 1rem;
+  padding: 1rem 1rem 1rem 0;
   overflow-y: auto;
+  border-right: 1px solid var(--border);
 }
 .chat__list-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
+  padding-right: 0.5rem;
 }
 .chat__list-head h2 {
   margin: 0;
-  font: 600 1.15rem var(--font-display);
+  font: 450 1.15rem var(--font-display);
 }
 .conv-list {
   display: grid;
-  gap: 0.3rem;
+  gap: 0.15rem;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -1531,25 +1534,30 @@ textarea:focus {
 .conv {
   display: grid;
   gap: 0.15rem;
-  padding: 0.6rem 0.75rem;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  color: var(--parchment-soft);
+  padding: 0.65rem 0.85rem;
+  border: 0;
+  border-left: 3px solid transparent;
+  border-radius: 0;
+  color: var(--parchment-dim);
   text-decoration: none;
-  transition: background 0.2s var(--ease), border-color 0.2s var(--ease);
+  transition:
+    background var(--duration) var(--ease),
+    color var(--duration) var(--ease),
+    border-color var(--duration) var(--ease);
 }
 .conv:hover {
-  background: var(--surface);
+  background: var(--surface-paper);
   color: var(--parchment);
 }
 .conv.is-active {
-  background: var(--surface-strong);
-  border-color: var(--border-strong);
+  background: var(--surface-paper);
+  border-left-color: var(--brass-bright);
   color: var(--parchment);
 }
 .conv__title {
   overflow: hidden;
-  font-weight: 600;
+  font-weight: 500;
+  font-family: var(--font-display);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1575,13 +1583,15 @@ textarea:focus {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background: var(--surface-paper);
 }
 .chat__head {
   display: flex;
   align-items: center;
   gap: 1rem;
-  padding: 0.9rem 1.25rem;
+  padding: 0.85rem 1.35rem;
   border-bottom: 1px solid var(--border);
+  background: transparent;
 }
 .chat__back {
   display: none;
@@ -1593,7 +1603,7 @@ textarea:focus {
 .chat__title {
   margin: 0;
   overflow: hidden;
-  font: 500 1.35rem var(--font-display);
+  font: 400 1.4rem var(--font-display);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1607,12 +1617,12 @@ textarea:focus {
 }
 .chat__tools {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.4rem;
 }
 .chat__scroll {
   flex: 1;
   min-height: 0;
-  padding: 1.25rem;
+  padding: 1.35rem 1.5rem;
   overflow-y: auto;
   scroll-behavior: smooth;
 }
@@ -1620,6 +1630,7 @@ textarea:focus {
   display: grid;
   align-content: start;
   gap: 1rem;
+  padding-top: 1.75rem;
 }
 .chat__older {
   display: block;
@@ -1629,12 +1640,12 @@ textarea:focus {
   text-align: center;
 }
 .chat__alert {
-  padding: 0 1.25rem 0.5rem;
+  padding: 0 1.35rem 0.5rem;
 }
 .chat__fineprint {
   margin: 0;
-  padding: 0 1.25rem 0.8rem;
-  font-size: 0.78rem;
+  padding: 0 1.35rem 0.85rem;
+  font-size: 0.76rem;
   text-align: center;
   color: var(--parchment-faint);
 }
@@ -1776,8 +1787,9 @@ textarea:focus {
   display: flex;
   align-items: flex-end;
   gap: 0.75rem;
-  padding: 0.75rem 1.25rem 0.5rem;
+  padding: 0.85rem 1.35rem 0.65rem;
   border-top: 1px solid var(--border);
+  background: transparent;
 }
 .composer textarea {
   flex: 1;
@@ -1785,6 +1797,8 @@ textarea:focus {
   max-height: 9rem;
   resize: none;
   field-sizing: content;
+  background: rgb(4 12 9 / 0.35);
+  border-radius: var(--radius);
 }
 .composer__btn {
   flex: none;
@@ -1805,18 +1819,20 @@ textarea:focus {
 
 .newchat {
   display: grid;
-  gap: 1.25rem;
-  max-width: 640px;
+  gap: 1.5rem;
+  max-width: 560px;
   margin: 0 auto;
-  padding-top: 1rem;
+  padding: 1.25rem 0.25rem 0;
 }
 .newchat__title {
-  margin: 0.2rem 0 0;
-  font: 400 clamp(1.9rem, 4vw, 2.6rem) var(--font-display);
+  margin: 0.25rem 0 0;
+  font: 400 clamp(1.85rem, 4vw, 2.55rem) / 1.15 var(--font-display);
+  max-width: 18ch;
 }
 .newchat__options {
   display: grid;
-  gap: 1rem;
+  gap: 0.95rem;
+  padding: 0.25rem 0;
 }
 
 /* crisis resources */
@@ -2226,6 +2242,9 @@ textarea:focus {
   }
   .chat:not(.chat--thread) .chat__list {
     max-height: 14rem;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    padding: 0.75rem 0;
   }
   .chat:not(.chat--thread) .chat__main {
     min-height: 28rem;

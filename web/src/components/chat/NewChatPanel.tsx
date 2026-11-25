@@ -41,8 +41,8 @@ export function NewChatPanel({
     <form className="newchat" onSubmit={submit}>
       <header>
         <p className="eyebrow">New conversation</p>
-        <h1 className="newchat__title">What's on your mind?</h1>
-        <p className="lede">Ask about a book in your library, or just talk about your day.</p>
+        <h1 className="newchat__title">What’s on your mind about your reading?</h1>
+        <p className="lede">A chapter that stuck with you, a question you can’t shake, or simply how the day feels.</p>
       </header>
 
       <div className="newchat__options">
