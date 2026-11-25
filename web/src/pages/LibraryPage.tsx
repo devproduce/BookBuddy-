@@ -94,6 +94,7 @@ export function LibraryPage() {
         <div>
           <p className="eyebrow">Your shelf</p>
           <h1 className="page-title">Library</h1>
+          <p className="lede">The books you bring here become part of every conversation.</p>
         </div>
         <Link to="/library/add" className="btn btn--primary">
           Add book
