@@ -1,10 +1,13 @@
+import { strings } from '../i18n'
 import { BrandMark } from './BrandMark'
 
 export function Splash() {
   return (
     <div className="splash" role="status" aria-live="polite">
-      <BrandMark size={56} />
-      <p>Opening your library…</p>
+      <div className="splash__mark">
+        <BrandMark size={56} />
+      </div>
+      <p className="splash__message">{strings.splash.message}</p>
     </div>
   )
 }

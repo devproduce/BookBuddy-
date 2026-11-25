@@ -229,6 +229,9 @@ svg {
   color: var(--parchment);
   flex: none;
 }
+.brand-mark__spark {
+  transform-origin: 49px 10px;
+}
 
 .brand-hero {
   display: flex;
@@ -612,13 +615,46 @@ select option {
   display: grid;
   place-content: center;
   justify-items: center;
-  gap: 1rem;
+  gap: 1.15rem;
   color: var(--parchment-dim);
-  font-family: var(--font-display);
-  font-style: italic;
+}
+.splash__mark {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+.splash__mark::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--brass-bright);
+  box-shadow: 0 0 12px 2px rgb(230 194 119 / 0.45);
+  animation: spark 2.4s var(--ease) infinite;
 }
 .splash .brand-mark {
-  animation: breathe 2.2s ease-in-out infinite;
+  animation: breathe 2.4s ease-in-out infinite;
+}
+.splash__message {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 1.15rem;
+  color: var(--parchment-soft);
+  animation: fade var(--duration-slow) calc(var(--stagger) * 2) var(--ease) both;
+}
+@keyframes spark {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.85);
+  }
+  45% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
 }
 
 /* ---------- app shell ---------- */

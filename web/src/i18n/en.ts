@@ -20,6 +20,10 @@ export const en = {
     loading: 'Loading…',
   },
 
+  splash: {
+    message: 'Opening your reading room…',
+  },
+
   nav: {
     home: 'Home',
     library: 'Library',
