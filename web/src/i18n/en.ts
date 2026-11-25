@@ -71,6 +71,10 @@ export const en = {
   },
 
   auth: {
+    tagline: 'Read slowly. Talk it through. A companion for every book you open.',
+    quote:
+      'The books on your shelf already know you. Book Buddy helps you listen—and recognize yourself in the pages.',
+    quoteCite: 'Book Buddy',
     login: {
       title: 'Welcome back',
       subtitle: 'Sign in to pick up where you left off.',

@@ -1,14 +1,16 @@
 import type { ReactNode } from 'react'
 import { BrandHero } from '../components/BrandMark'
+import { strings } from '../i18n'
 
 export function AuthLayout({ children }: { children: ReactNode }) {
+  const t = strings.auth
   return (
     <div className="auth">
       <div className="auth__hero">
-        <BrandHero tagline="Read slowly. Talk it through. A companion for every book you open." />
+        <BrandHero tagline={t.tagline} />
         <blockquote className="auth__quote">
-          “A reader lives a thousand lives before he dies.”
-          <cite>George R. R. Martin</cite>
+          {t.quote}
+          <cite>{t.quoteCite}</cite>
         </blockquote>
       </div>
       <main className="auth__panel" id="main-content">
