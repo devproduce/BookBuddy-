@@ -26,12 +26,13 @@
   --ember: #e59a7c;
   --danger: #e3877a;
 
-  /* semantic */
+  /* semantic — warmer paper-in-dim-room surfaces */
   --bg: var(--forest-900);
-  --surface: rgb(240 228 200 / 0.045);
-  --surface-strong: rgb(240 228 200 / 0.08);
-  --border: rgb(240 228 200 / 0.12);
-  --border-strong: rgb(240 228 200 / 0.26);
+  --surface: rgb(240 228 200 / 0.055);
+  --surface-strong: rgb(240 228 200 / 0.1);
+  --surface-paper: rgb(240 228 200 / 0.035);
+  --border: rgb(240 228 200 / 0.1);
+  --border-strong: rgb(240 228 200 / 0.22);
   --text: var(--parchment);
   --text-muted: var(--parchment-dim);
   --focus: var(--brass-bright);
@@ -43,10 +44,14 @@
 
   /* shape + motion */
   --radius-sm: 8px;
-  --radius: 14px;
-  --radius-lg: 22px;
-  --shadow: 0 1px 0 rgb(240 228 200 / 0.05) inset, 0 18px 40px -22px rgb(0 0 0 / 0.7);
+  --radius: 12px;
+  --radius-lg: 18px;
+  --radius-pill: 999px;
+  --shadow: 0 1px 0 rgb(240 228 200 / 0.04) inset, 0 16px 36px -24px rgb(0 0 0 / 0.65);
   --ease: cubic-bezier(0.22, 0.8, 0.24, 1);
+  --duration: 0.22s;
+  --duration-slow: 0.55s;
+  --stagger: 0.07s;
   --rail-w: 248px;
 
   color-scheme: dark;
@@ -121,7 +126,7 @@ a {
   color: var(--brass-bright);
   text-decoration-color: rgb(230 194 119 / 0.4);
   text-underline-offset: 3px;
-  transition: color 0.2s var(--ease);
+  transition: color var(--duration) var(--ease);
 }
 a:hover {
   color: var(--parchment);
@@ -184,16 +189,25 @@ svg {
 }
 
 .page > * {
-  animation: rise 0.6s var(--ease) both;
+  animation: rise var(--duration-slow) var(--ease) both;
 }
 .page > *:nth-child(2) {
-  animation-delay: 0.07s;
+  animation-delay: var(--stagger);
 }
 .page > *:nth-child(3) {
-  animation-delay: 0.14s;
+  animation-delay: calc(var(--stagger) * 2);
 }
 .page > *:nth-child(4) {
-  animation-delay: 0.21s;
+  animation-delay: calc(var(--stagger) * 3);
+}
+
+@keyframes underline-grow {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -268,7 +282,7 @@ svg {
   min-height: 46px;
   padding: 0.65rem 1.4rem;
   border: 1px solid var(--border-strong);
-  border-radius: 999px;
+  border-radius: var(--radius);
   background: var(--btn-bg);
   color: var(--btn-fg);
   font: 600 1rem/1 var(--font-body);
@@ -276,10 +290,10 @@ svg {
   text-decoration: none;
   cursor: pointer;
   transition:
-    transform 0.2s var(--ease),
-    background 0.2s var(--ease),
-    border-color 0.2s var(--ease),
-    box-shadow 0.2s var(--ease);
+    transform var(--duration) var(--ease),
+    background var(--duration) var(--ease),
+    border-color var(--duration) var(--ease),
+    box-shadow var(--duration) var(--ease);
 }
 .btn:hover {
   color: var(--btn-fg);
@@ -325,11 +339,13 @@ svg {
   min-height: 56px;
   padding: 0.9rem 2rem;
   font-size: 1.1rem;
+  border-radius: var(--radius-lg);
 }
 .btn--sm {
   min-height: 36px;
   padding: 0.45rem 1rem;
   font-size: 0.92rem;
+  border-radius: var(--radius-sm);
 }
 .btn--block {
   width: 100%;
@@ -360,7 +376,7 @@ svg {
   padding: clamp(1.25rem, 3vw, 2rem);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  background: var(--surface);
+  background: var(--surface-paper);
   box-shadow: var(--shadow);
 }
 .form__actions {
@@ -656,20 +672,20 @@ select option {
   min-height: 48px;
   padding: 0.55rem 0.9rem;
   border-radius: var(--radius-sm);
-  color: var(--parchment-soft);
+  color: var(--parchment-dim);
   text-decoration: none;
   font-weight: 600;
   position: relative;
   transition:
-    background 0.2s var(--ease),
-    color 0.2s var(--ease);
+    background var(--duration) var(--ease),
+    color var(--duration) var(--ease);
 }
 .nav__item:hover {
   background: var(--surface);
   color: var(--parchment);
 }
 .nav__item.is-active {
-  background: var(--surface-strong);
+  background: var(--surface-paper);
   color: var(--brass-bright);
 }
 .nav__item.is-active::before {
@@ -681,6 +697,8 @@ select option {
   width: 3px;
   border-radius: 0 3px 3px 0;
   background: var(--brass-bright);
+  transform-origin: center top;
+  animation: underline-grow var(--duration-slow) var(--ease) both;
 }
 .nav__item--disabled {
   opacity: 0.5;
@@ -695,7 +713,7 @@ select option {
   margin-left: auto;
   padding: 0.12rem 0.55rem;
   border: 1px solid var(--border-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.12em;
@@ -1097,7 +1115,7 @@ select option {
 .switch__track {
   position: absolute;
   inset: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid var(--border-strong);
   background: rgb(4 12 9 / 0.5);
 }
@@ -1153,7 +1171,7 @@ select option {
   margin-right: 0.9rem;
   padding: 0.45rem 0.95rem;
   border: 1px solid var(--border-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--surface-strong);
   color: var(--parchment);
   font: 600 0.88rem var(--font-body);
@@ -1186,7 +1204,7 @@ textarea:focus {
 .progress {
   height: 8px;
   overflow: hidden;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--surface-strong);
 }
 .progress__bar {
@@ -1403,7 +1421,7 @@ textarea:focus {
 .conv__badge {
   padding: 0.05rem 0.45rem;
   border: 1px solid rgb(134 173 146 / 0.5);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 0.66rem;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -1553,7 +1571,7 @@ textarea:focus {
   appearance: none;
   padding: 0.2rem 0.65rem;
   border: 1px solid var(--border-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--parchment-soft);
   font: 400 0.82rem var(--font-body);
