@@ -29,9 +29,9 @@ export function ConsentGate({ children }: { children: ReactNode }) {
 
   return (
     <div className="consent" role="dialog" aria-modal="true" aria-labelledby="consent-title">
-      <div className="panel consent__card">
+      <div className="consent__card">
         <p className="eyebrow">Before we talk</p>
-        <h1 id="consent-title" tabIndex={-1} ref={focusOnMount} className="panel__title consent__title">
+        <h1 id="consent-title" tabIndex={-1} ref={focusOnMount} className="consent__title">
           How Book Buddy uses your messages
         </h1>
         <ul className="consent__list">
