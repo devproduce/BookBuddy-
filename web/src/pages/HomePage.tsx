@@ -47,48 +47,30 @@ export function HomePage() {
         </div>
       </section>
 
-      <div className="home__grid">
-        <section className="panel" aria-labelledby="home-continue">
-          <header className="panel__head">
-            <h2 id="home-continue">{t.continueReading}</h2>
-            <span className="tag">{t.soon}</span>
-          </header>
-          <div className="placeholder placeholder--book">
-            <div className="placeholder__cover" aria-hidden="true" />
-            <div className="placeholder__lines" aria-hidden="true">
-              <span style={{ width: '70%' }} />
-              <span style={{ width: '45%' }} />
-              <span style={{ width: '60%' }} />
-            </div>
-          </div>
-          <p className="panel__note">{t.continueNote}</p>
-        </section>
-
-        <section className="panel" aria-labelledby="home-recent">
-          <header className="panel__head">
-            <h2 id="home-recent">{t.recentTitle}</h2>
-            <Link to="/chat" className="link-btn">
-              {t.newChat}
-            </Link>
-          </header>
-          {recent && recent.length > 0 ? (
-            <ul className="recent-list">
-              {recent.map((c) => (
-                <li key={c.id}>
-                  <Link to={`/chat/${c.id}`} className="recent-list__item">
-                    <span className="recent-list__title">{c.title}</span>
-                    {c.incognito && <span className="conv__badge">{t.incognito}</span>}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="panel__note" role={recent === null ? 'status' : undefined}>
-              {recent === null ? strings.a11y.loading : t.recentEmpty}
-            </p>
-          )}
-        </section>
-      </div>
+      <section className="home__recent" aria-labelledby="home-recent">
+        <header className="home__recent-head">
+          <h2 id="home-recent">{t.recentTitle}</h2>
+          <Link to="/chat" className="link-btn">
+            {t.newChat}
+          </Link>
+        </header>
+        {recent && recent.length > 0 ? (
+          <ul className="recent-list">
+            {recent.map((c) => (
+              <li key={c.id}>
+                <Link to={`/chat/${c.id}`} className="recent-list__item">
+                  <span className="recent-list__title">{c.title}</span>
+                  {c.incognito && <span className="conv__badge">{t.incognito}</span>}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="home__recent-empty" role={recent === null ? 'status' : undefined}>
+            {recent === null ? strings.a11y.loading : t.recentEmpty}
+          </p>
+        )}
+      </section>
     </div>
   )
 }
