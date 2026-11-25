@@ -1205,8 +1205,8 @@ select option {
   width: 100%;
   padding: 0.7rem 0.95rem;
   border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-sm);
-  background: rgb(4 12 9 / 0.45);
+  border-radius: var(--radius);
+  background: rgb(4 12 9 / 0.35);
   color: var(--parchment-soft);
   font: 400 0.98rem var(--font-body);
   cursor: pointer;
@@ -1223,6 +1223,56 @@ select option {
   color: var(--parchment);
   font: 600 0.88rem var(--font-body);
   cursor: pointer;
+}
+.form--quiet {
+  display: grid;
+  gap: 1.15rem;
+  padding: 0.25rem 0;
+}
+.dropzone {
+  display: grid;
+  place-items: center;
+  min-height: 9.5rem;
+  padding: 1.5rem 1.25rem;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface-paper);
+  color: var(--parchment-soft);
+  cursor: pointer;
+  text-align: center;
+  transition:
+    border-color var(--duration) var(--ease),
+    background var(--duration) var(--ease);
+}
+.dropzone:hover,
+.dropzone:focus-within {
+  border-color: var(--brass);
+  background: var(--surface);
+}
+.dropzone.is-filled {
+  border-style: solid;
+  border-color: rgb(207 169 90 / 0.35);
+}
+.dropzone__prompt {
+  display: grid;
+  gap: 0.35rem;
+  font: 500 1.15rem var(--font-display);
+  color: var(--parchment);
+}
+.dropzone__hint {
+  font: 400 0.92rem var(--font-body);
+  color: var(--parchment-dim);
+}
+.dropzone__chosen {
+  display: grid;
+  gap: 0.3rem;
+  justify-items: center;
+  color: var(--parchment-dim);
+  font-size: 0.92rem;
+}
+.dropzone__chosen strong {
+  font: 500 1.1rem var(--font-display);
+  color: var(--parchment);
 }
 textarea {
   width: 100%;
@@ -1262,30 +1312,72 @@ textarea:focus {
 }
 .detail {
   display: grid;
-  gap: 1.5rem;
+  gap: 1.75rem;
   max-width: 820px;
+}
+.detail__hero {
+  display: flex;
+  gap: 1.35rem;
+  align-items: flex-end;
+}
+.detail__cover {
+  --hue: 150;
+  flex: none;
+  width: 104px;
+  aspect-ratio: 2 / 3;
+  display: grid;
+  place-items: center;
+  border-radius: 2px 8px 8px 2px;
+  background:
+    linear-gradient(90deg, rgb(0 0 0 / 0.45) 0 6px, rgb(255 255 255 / 0.1) 6px 8px, transparent 8px),
+    linear-gradient(155deg, hsl(var(--hue) 32% 28%), hsl(calc(var(--hue) + 28) 34% 12%));
+  box-shadow: 5px 10px 22px -10px rgb(0 0 0 / 0.75);
+}
+.detail__cover span {
+  font-family: var(--font-display);
+  font-size: 2.6rem;
+  font-style: italic;
+  color: var(--parchment);
+}
+.detail__intro {
+  min-width: 0;
+  flex: 1;
+}
+.detail__intro .page-title {
+  margin-top: 0.25rem;
+  font-size: clamp(2rem, 5vw, 3.1rem);
+}
+@media (max-width: 560px) {
+  .detail__hero {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .detail__cover {
+    width: 78px;
+  }
 }
 .detail__meta {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.4rem 1.1rem;
-  margin: 0.4rem 0 0;
+  margin: 0.55rem 0 0;
   font-size: 0.95rem;
   color: var(--parchment-dim);
 }
 .panel {
   display: grid;
   gap: 1rem;
-  padding: clamp(1.1rem, 3vw, 1.75rem);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-  box-shadow: var(--shadow);
+  padding: clamp(1rem, 2.5vw, 1.5rem) 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 .panel__title {
   margin: 0;
-  font: 600 1.25rem var(--font-display);
+  font: 450 1.3rem var(--font-display);
   color: var(--parchment);
 }
 .panel__note {
@@ -1311,23 +1403,24 @@ textarea:focus {
 }
 .chunks {
   display: grid;
-  gap: 0.9rem;
+  gap: 1.25rem;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 .chunk {
-  padding: 0.9rem 1rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: rgb(4 12 9 / 0.3);
+  padding: 0.15rem 0 0.15rem 1.1rem;
+  border: 0;
+  border-left: 3px solid var(--brass);
+  border-radius: 0;
+  background: transparent;
 }
 .chunk__meta {
   display: flex;
   flex-wrap: wrap;
   gap: 0.25rem 0.9rem;
   margin: 0 0 0.45rem;
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -1335,7 +1428,9 @@ textarea:focus {
 }
 .chunk__text {
   margin: 0;
-  line-height: 1.6;
+  line-height: 1.65;
+  font-family: var(--font-display);
+  font-size: 1.02rem;
   color: var(--parchment-soft);
   overflow-wrap: anywhere;
 }
@@ -1352,10 +1447,10 @@ textarea:focus {
 .answer {
   display: grid;
   gap: 0.9rem;
-  padding: 1rem 1.1rem;
+  padding: 0.35rem 0 0.35rem 1.15rem;
   border-left: 3px solid var(--brass);
-  border-radius: var(--radius-sm);
-  background: rgb(4 12 9 / 0.35);
+  border-radius: 0;
+  background: transparent;
 }
 .answer__text {
   margin: 0;

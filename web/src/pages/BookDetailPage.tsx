@@ -225,17 +225,32 @@ export function BookDetailPage() {
         {'\u2190'} Library
       </Link>
 
-      <header className="page-head page-head--stack">
-        <p className="eyebrow">{book.author || 'Unknown author'}</p>
-        <h1 className="page-title">{book.title}</h1>
-        <p className="detail__meta">
-          <span className={`status status--${book.status.toLowerCase()}`}>
-            {STATUS_LABEL[book.status]}
-          </span>
-          {book.pageCount ? <span>{book.pageCount} pages</span> : null}
-          {book.chunkCount > 0 ? <span>{book.chunkCount} passages</span> : null}
-          {book.language ? <span>{book.language.toUpperCase()}</span> : null}
-        </p>
+      <header className="detail__hero">
+        <div
+          className="detail__cover"
+          style={{
+            ['--hue' as string]: (() => {
+              let h = 0
+              for (const ch of book.title) h = (h * 31 + ch.charCodeAt(0)) % 360
+              return h
+            })(),
+          }}
+          aria-hidden="true"
+        >
+          <span>{book.title.slice(0, 1).toUpperCase()}</span>
+        </div>
+        <div className="detail__intro">
+          <p className="eyebrow">{book.author || 'Unknown author'}</p>
+          <h1 className="page-title">{book.title}</h1>
+          <p className="detail__meta">
+            <span className={`status status--${book.status.toLowerCase()}`}>
+              {STATUS_LABEL[book.status]}
+            </span>
+            {book.pageCount ? <span>{book.pageCount} pages</span> : null}
+            {book.chunkCount > 0 ? <span>{book.chunkCount} passages</span> : null}
+            {book.language ? <span>{book.language.toUpperCase()}</span> : null}
+          </p>
+        </div>
       </header>
 
       <Alert>{error}</Alert>

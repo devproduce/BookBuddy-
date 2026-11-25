@@ -153,7 +153,7 @@ export function AddBookPage() {
         </p>
       </header>
 
-      <form className="form form--card" onSubmit={onSubmit}>
+      <form className="form form--quiet" onSubmit={onSubmit}>
         <Alert>{error}</Alert>
         {duplicateId && (
           <p className="hint">
@@ -162,26 +162,36 @@ export function AddBookPage() {
         )}
 
         <div className="field">
-          <span className="field__label">PDF file</span>
-          <input
-            ref={fileInput}
-            className="file-input"
-            type="file"
-            accept="application/pdf,.pdf"
-            disabled={busy}
-            onChange={onPickFile}
-          />
-          {file && (
-            <p className="hint">
-              {file.name} {'\u00B7'} {formatSize(file.size)}
-              {contentHash && (
-                <>
-                  {' '}
-                  {'\u00B7'} <span className="mono hint__hash">SHA-256 {contentHash.slice(0, 12)}{'\u2026'}</span>
-                </>
-              )}
-            </p>
-          )}
+          <span className="field__label">Place the book here</span>
+          <label className={`dropzone${file ? ' is-filled' : ''}`}>
+            <input
+              ref={fileInput}
+              className="sr-only"
+              type="file"
+              accept="application/pdf,.pdf"
+              disabled={busy}
+              onChange={onPickFile}
+            />
+            {file ? (
+              <span className="dropzone__chosen">
+                <strong>{file.name}</strong>
+                <span>
+                  {formatSize(file.size)}
+                  {contentHash && (
+                    <>
+                      {' '}
+                      {'\u00B7'} <span className="mono hint__hash">SHA-256 {contentHash.slice(0, 12)}{'\u2026'}</span>
+                    </>
+                  )}
+                </span>
+              </span>
+            ) : (
+              <span className="dropzone__prompt">
+                Choose a PDF
+                <span className="dropzone__hint">Fingerprinted in your browser, then read and discarded</span>
+              </span>
+            )}
+          </label>
         </div>
 
         <label className="field">
