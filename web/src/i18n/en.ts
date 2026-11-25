@@ -10,7 +10,7 @@ export const en = {
     name: 'Book Buddy',
     nameFirst: 'Book',
     nameSecond: 'Buddy',
-    footnote: 'Your reading companion.',
+    footnote: 'A quiet room for every book you open.',
   },
 
   a11y: {
