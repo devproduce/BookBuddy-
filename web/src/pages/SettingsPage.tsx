@@ -133,6 +133,7 @@ export function SettingsPage() {
       <header className="page-head page-head--stack">
         <p className="eyebrow">Preferences</p>
         <h1 className="page-title">Settings</h1>
+        <p className="lede">Language, safety contacts, and how Book Buddy looks after your data.</p>
       </header>
 
       <Alert>{error}</Alert>

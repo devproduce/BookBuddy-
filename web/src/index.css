@@ -2185,18 +2185,23 @@ textarea:focus {
 }
 
 /* settings: danger zone */
+.narrow > .panel {
+  padding-top: 1.35rem;
+  padding-bottom: 1.35rem;
+}
 .danger-zone {
   display: grid;
   gap: 0.75rem;
-  margin-top: 0.5rem;
-  padding: 1rem 1.1rem;
-  border: 1px solid rgb(227 135 122 / 0.35);
-  border-radius: var(--radius);
-  background: rgb(227 135 122 / 0.05);
+  margin-top: 0.65rem;
+  padding: 1rem 0 0.25rem 1.05rem;
+  border: 0;
+  border-left: 3px solid rgb(227 135 122 / 0.55);
+  border-radius: 0;
+  background: transparent;
 }
 .danger-zone__title {
   margin: 0;
-  font: 500 1.1rem var(--font-display);
+  font: 450 1.1rem var(--font-display);
   color: var(--danger);
 }
 .danger-zone__confirm {
