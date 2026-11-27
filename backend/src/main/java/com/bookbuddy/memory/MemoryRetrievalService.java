@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
@@ -65,6 +66,8 @@ public class MemoryRetrievalService {
     private final MongoTemplate mongo;
     private final MemoryEngineClient engine;
 
+    /** Spring entry point. Marked explicitly because a package-private test overload also exists. */
+    @Autowired
     public MemoryRetrievalService(
             MemoryRepository repository,
             UserProfileRepository profiles,
